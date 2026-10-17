@@ -53,7 +53,7 @@ public final class MainActivity extends Activity {
     }
     private Button button(String s,boolean primary) {
         Button b=new Button(this);
-        b.setText(s);b.setTextAllCaps(false);b.setTextSize(14);
+        b.setText(s);b.setAllCaps(false);b.setTextSize(14);
         b.setTextColor(primary?Color.WHITE:NAVY);
         b.setBackground(background(primary?BLUE:0xffe4ecf8,10));
         b.setPadding(dp(10),dp(9),dp(10),dp(9));
