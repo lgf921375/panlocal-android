@@ -92,7 +92,7 @@ public final class MainActivity extends Activity {
         LinearLayout hero=column();
         hero.setPadding(dp(20),dp(25),dp(20),dp(24));
         hero.setBackgroundColor(NAVY);outer.addView(hero);
-        hero.addView(text("PANLOCAL · 安卓本地版 V0.9",12,0xffa5c4fc,true),params(0));
+        hero.addView(text("PANLOCAL · 安卓本地版 V1.0",12,0xffa5c4fc,true),params(0));
         hero.addView(text("百度网盘直链助手",25,Color.WHITE,true),params(10));
         hero.addView(text("粘贴分享链接 → 尝试读取文件 → 请求下载地址",13,0xffd0dcf0,false),params(10));
 
@@ -124,11 +124,11 @@ public final class MainActivity extends Activity {
         myDrive.setPadding(dp(16),dp(16),dp(16),dp(18));
         content.addView(myDrive,params(14));
         myDrive.addView(text("02  我的网盘（OAuth 测试入口）",18,NAVY,true),params(0));
-        myDrive.addView(text("原始文件已在自己的网盘，无需转存。个人文件模式需要自有服务器的 OAuth Bridge；服务器未部署前只能进行连通性检查，不代表授权或下载成功。",13,GREY,false),params(9));
+        myDrive.addView(text("视频已在自己的网盘，无需转存。可使用 V1.0 的本地 code 授权实验，不依赖服务器；另保留 V0.8 服务器 OAuth Bridge 入口。任何方式获得的 dlink 均需实际验证。",13,GREY,false),params(9));
         Button own=button("进入我的网盘 · 授权与搜索",true);
         myDrive.addView(own,params(10));
         own.setOnClickListener(v->startActivity(new Intent(this,MyDriveActivity.class)));
-        Button local=button("不依赖服务器 · 我的网盘（实验）",false);
+        Button local=button("本地授权 · 我的网盘（实验 V1.0）",false);
         myDrive.addView(local,params(8));
         local.setOnClickListener(v->startActivity(new Intent(this,LocalDriveActivity.class)));
 

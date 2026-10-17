@@ -27,14 +27,15 @@ import java.util.Locale;
 import java.util.UUID;
 
 /**
- * No-server / no-client-secret experiment. Does not register callbacks,
- * read Baidu-app cookies, or capture other apps' credentials.
- * User must explicitly paste the official OAuth result locally.
- * Access token exists only in the Activity instance's memory.
+ * Single-user no-server OAuth compatibility experiment.
+ * Supports official OAuth code/oob and requires owner-entered app SecretKey
+ * ONLY at runtime; never embedded, logged, cached or persisted by this app.
+ * Secret and one-time code are sent only over HTTPS to Baidu's official token API.
+ * It does not capture Baidu-app cookies. Token stays in activity memory.
  */
 public final class LocalDriveActivity extends Activity {
     private static final int NAVY=0xff14264c;
-    private EditText appKey,tokenEntry,query;
+    private EditText appKey,tokenEntry,query,authCodeEntry,secretEntry;
     private TextView stateText;
     private LinearLayout layout,files;
     private String token="",csrf="";
@@ -77,23 +78,31 @@ public final class LocalDriveActivity extends Activity {
         layout.setPadding(dp(18),dp(18),dp(18),dp(32));
         layout.setBackgroundColor(0xfff3f6fa);
         sc.addView(layout);setContentView(sc);
-        layout.addView(label("PanLocal V0.9 · 无服务器模式（实验）",20),space(0));
-        layout.addView(label("旧版百度资料曾提供免 SecretKey 的 response_type=token 授权；2026 年是否支持尚未确认。如果官方不提供令牌，这条路线暂不可用。原 V0.8 功能不受影响。",13),space(10));
+        layout.addView(label("PanLocal V1.0 · 本地 OAuth 授权实验",20),space(0));
+        layout.addView(label("已确认旧版免密网页授权在你手机的多个浏览器里不能正常显示。改用百度文档支持的 code + oob：先获取一次性授权码，再临时输入自己应用的 SecretKey 在本机兑换令牌。密钥不写入APK、日志或远程服务器，属于单用户实验用途。",13),space(10));
         layout.addView(label("第一步：输入你自己的 App Key（不是 SecretKey）",14),space(15));
         appKey=field("从百度开放平台复制 App Key",layout,false);
-        Button open=button("1. 打开百度官方免服务器授权页",layout);
+        Button openCode=button("1. 打开百度官方授权页（获取 code）",layout);
+        openCode.setOnClickListener(v->openCodeAuthorization());
+        layout.addView(label("授权完成后，百度页面应显示一次性 code。只在下方输入框粘贴；不要发送到聊天或截图。再输入已经轮换过的 SecretKey（密码框），在本手机直接向百度官方接口交换令牌。",13),space(13));
+        authCodeEntry=field("百度官方显示的 code（授权码）",layout,true);
+        secretEntry=field("临时输入 SecretKey（不保存）",layout,true);
+        Button exchange=button("2. 本机兑换令牌并验证账号",layout);
+        exchange.setOnClickListener(v->exchangeCode());
+        layout.addView(label("旧版隐式授权（仅保留作兼容性研究，不推荐）",14),space(20));
+        Button open=button("旧版：response_type=token 授权",layout);
         open.setOnClickListener(v->openAuthorization());
-        layout.addView(label("第二步：如官方页面提供 Access Token 或包含 access_token 的地址，只粘贴到此 APP。不要发到聊天，也不要截屏发送。若仅显示 code，则当前模式无法使用。",13),space(13));
+        layout.addView(label("旧方式如果确实返回 access_token，可以粘贴到下方验证；遇到空白页请停止重试。",13),space(13));
         tokenEntry=field("粘贴官方 Access Token 或完整授权结果 URL",layout,true);
-        Button paste=button("2. 从手机剪贴板粘贴到输入框",layout);
+        Button paste=button("从剪贴板粘贴旧方式的 token",layout);
         paste.setOnClickListener(v->pasteResult());
-        Button verify=button("3. 验证个人网盘授权",layout);
+        Button verify=button("验证旧方式的 token",layout);
         verify.setOnClickListener(v->verify());
         stateText=label("状态：未授权；此模式不依赖新加坡服务器。",14);
         layout.addView(stateText,space(14));
-        layout.addView(label("第三步：已验证授权后搜索本人网盘文件",14),space(18));
+        layout.addView(label("第三步：任一方式授权成功后搜索本人网盘文件",14),space(18));
         query=field("文件名关键词，例如 传奇",layout,false);
-        Button search=button("4. 搜索我的网盘文件",layout);
+        Button search=button("3. 搜索我的网盘文件",layout);
         search.setOnClickListener(v->search());
         files=new LinearLayout(this);files.setOrientation(LinearLayout.VERTICAL);
         layout.addView(files,space(10));
@@ -104,7 +113,75 @@ public final class LocalDriveActivity extends Activity {
             stateText.setText("已清除本机临时令牌；没有将其保存到文件。");
             DiagnosticLog.event("LOCALDRIVE","用户清除临时令牌");
         });
-        layout.addView(label("隐私：只使用百度官方授权域名和网盘接口；不会读取百度 APP 登录 Cookie。Access Token 仅保留在当前界面内存，离开界面即失效。TXT 日志不记录密钥、令牌和下载地址。",12),space(17));
+        layout.addView(label("隐私：只访问百度官方 OAuth 与网盘接口；无需你自己的服务器。SecretKey 和 code 只临时保留在内存，不写入 APK、存储、日志；令牌只保留在当前页面内存。不要用屏幕录制、共享屏幕或把凭据发给聊天。",12),space(17));
+    }
+    private void openCodeAuthorization(){
+        String key=appKey.getText().toString().trim();
+        if(!key.matches("[A-Za-z0-9_-]{8,128}")){stateText.setText("请先填入正确的 App Key，而不是 SecretKey。");return;}
+        csrf=UUID.randomUUID().toString();
+        try{
+            String auth="https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id="
+                +encode(key)+"&redirect_uri=oob&scope="+encode("basic,netdisk")
+                +"&display=mobile&state="+encode(csrf);
+            DiagnosticLog.event("LOCALDRIVE","百度官方 code 授权启动, redirect=oob, without-secret=true");
+            stateText.setText("已打开官方授权页。授权成功后复制 code 回来；若出现错误，只反馈错误名称，不提供 code 或 SecretKey。");
+            startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(auth)));
+        }catch(Exception e){stateText.setText("不能打开百度官方授权页面");}
+    }
+    private void exchangeCode(){
+        final String key=appKey.getText().toString().trim();
+        final String code=authCodeEntry.getText().toString().trim();
+        final String secret=secretEntry.getText().toString().trim();
+        authCodeEntry.setText("");
+        secretEntry.setText("");
+        if(!key.matches("[A-Za-z0-9_-]{8,128}")||!code.matches("[A-Za-z0-9._-]{8,512}")||!secret.matches("[A-Za-z0-9._~-]{12,512}")){
+            stateText.setText("App Key、code 或 SecretKey 格式错误。请确认是百度官方签发的授权码以及已轮换过的密钥。");return;
+        }
+        token="";verified=false;
+        work("官方授权码兑换",()->{
+            String url="https://openapi.baidu.com/oauth/2.0/token?grant_type=authorization_code"
+                +"&client_id="+encode(key)+"&client_secret="+encode(secret)+"&redirect_uri=oob&code="+encode(code);
+            HttpURLConnection con=(HttpURLConnection)new URL(url).openConnection();
+            con.setInstanceFollowRedirects(false);
+            con.setConnectTimeout(12000);con.setReadTimeout(18000);
+            con.setRequestProperty("Accept","application/json");
+            try{
+                int http=con.getResponseCode();
+                InputStream in=http==200?con.getInputStream():con.getErrorStream();
+                if(in==null){DiagnosticLog.event("LOCALDRIVE","code-exchange http="+http+" no-body");message("百度令牌接口 HTTP "+http+"；未取得 Token。");return;}
+                ByteArrayOutputStream out=new ByteArrayOutputStream();
+                try(InputStream stream=in){
+                    byte[] buf=new byte[4096];int n;
+                    while((n=stream.read(buf))!=-1){
+                        if(out.size()+n>32768)throw new Exception("response_too_big");
+                        out.write(buf,0,n);
+                    }
+                }
+                JSONObject response=new JSONObject(out.toString("UTF-8"));
+                String error=response.optString("error","");
+                String received=response.optString("access_token","");
+                DiagnosticLog.event("LOCALDRIVE","code-exchange http="+http+" tokenPresent="+!received.isEmpty()+" errorType="+safeOAuthError(error));
+                if(http!=200||received.isEmpty()){
+                    message("百度拒绝授权码交换，HTTP "+http+"；错误："+safeOAuthError(error)+"。请检查授权码时效、回调配置及应用权限。");return;
+                }
+                token=received;
+                JSONObject account=api("uinfo");
+                int errno=account.optInt("errno",-999);
+                verified=errno==0;
+                DiagnosticLog.event("LOCALDRIVE","code-uinfo errno="+errno+" verified="+verified);
+                if(verified)message("本人网盘授权通过。现在可以搜索文件；退出此页面后令牌将清除。");
+                else{token="";message("已取得 Token，但个人网盘接口验证失败 errno="+errno+"；检查网盘 scope。");}
+            }finally{con.disconnect();}
+        });
+    }
+    private static String safeOAuthError(String raw){
+        switch(raw){
+            case "invalid_grant":case "invalid_client":case "invalid_scope":
+            case "unauthorized_client":case "unsupported_grant_type":
+            case "redirect_uri_mismatch":case "invalid_request":
+                return raw;
+            default:return raw.isEmpty()?"未给出错误码":"其他错误";
+        }
     }
     private static String encode(String value)throws Exception{return URLEncoder.encode(value,"UTF-8");}
     private void openAuthorization(){
@@ -251,6 +328,8 @@ public final class LocalDriveActivity extends Activity {
     }
     @Override protected void onDestroy(){
         token="";verified=false;
+        if(secretEntry!=null)secretEntry.setText("");
+        if(authCodeEntry!=null)authCodeEntry.setText("");
         super.onDestroy();
     }
 }
