@@ -87,56 +87,80 @@ public final class BaiduShare {
         if(code==105||code==110||code==-12)return "分享已失效或访问受限。";
         return "百度网盘返回错误码："+code;
     }
+    /** Only pan.baidu.com HTTPS redirects are followed. Login redirects are reported, never followed. */
     private String request(String address,String form,String referer)throws Exception {
         URL url=new URL(address);
-        if(!"https".equalsIgnoreCase(url.getProtocol())||!"pan.baidu.com".equalsIgnoreCase(url.getHost()))
-            throw new Exception("仅允许请求百度网盘官方 HTTPS 接口。");
-        HttpURLConnection conn=(HttpURLConnection)url.openConnection();
-        conn.setInstanceFollowRedirects(false);
-        conn.setConnectTimeout(12000);
-        conn.setReadTimeout(15000);
-        conn.setRequestProperty("User-Agent",USER_AGENT);
-        conn.setRequestProperty("Accept","application/json,text/html,*/*");
-        conn.setRequestProperty("Referer",referer);
-        conn.setRequestProperty("X-Requested-With","XMLHttpRequest");
-        if(!cookies.isEmpty()){
-            StringBuilder cookie=new StringBuilder();
-            for(Map.Entry<String,String> c:cookies.entrySet()){
-                if(cookie.length()>0)cookie.append("; ");
-                cookie.append(c.getKey()).append('=').append(c.getValue());
-            }
-            conn.setRequestProperty("Cookie",cookie.toString());
-        }
-        try {
-            if(form!=null) {
-                conn.setRequestMethod("POST");
-                conn.setDoOutput(true);
-                conn.setRequestProperty("Content-Type","application/x-www-form-urlencoded; charset=UTF-8");
-                try(OutputStream output=conn.getOutputStream()){
-                    output.write(form.getBytes(StandardCharsets.UTF_8));
+        for(int hop=0;hop<=5;hop++){
+            if(!"https".equalsIgnoreCase(url.getProtocol())
+                ||!"pan.baidu.com".equalsIgnoreCase(url.getHost())
+                ||(url.getPort()!=-1&&url.getPort()!=443)
+                ||url.getUserInfo()!=null)
+                throw new Exception("已阻止跳转至非百度网盘官方 HTTPS 接口。");
+            HttpURLConnection conn=(HttpURLConnection)url.openConnection();
+            conn.setInstanceFollowRedirects(false);
+            conn.setConnectTimeout(12000);
+            conn.setReadTimeout(15000);
+            conn.setRequestProperty("User-Agent",USER_AGENT);
+            conn.setRequestProperty("Accept","application/json,text/html,*/*");
+            conn.setRequestProperty("Referer",referer);
+            // Navigation to the share page is not an AJAX request.
+            if(url.getPath().startsWith("/api/") || url.getPath().startsWith("/share/"))
+                conn.setRequestProperty("X-Requested-With","XMLHttpRequest");
+            if(!cookies.isEmpty()){
+                StringBuilder cookie=new StringBuilder();
+                for(Map.Entry<String,String> c:cookies.entrySet()){
+                    if(cookie.length()>0)cookie.append("; ");
+                    cookie.append(c.getKey()).append('=').append(c.getValue());
                 }
+                conn.setRequestProperty("Cookie",cookie.toString());
             }
-            int status=conn.getResponseCode();
-            Map<String,List<String>> headers=conn.getHeaderFields();
-            if(headers!=null)for(Map.Entry<String,List<String>> header:headers.entrySet()){
-                if(header.getKey()!=null&&header.getKey().equalsIgnoreCase("Set-Cookie"))
-                    for(String val:header.getValue()){
-                        String part=val.split(";",2)[0];
-                        int eq=part.indexOf('=');
-                        if(eq>0)cookies.put(part.substring(0,eq),part.substring(eq+1));
+            try{
+                if(form!=null){
+                    conn.setRequestMethod("POST");
+                    conn.setDoOutput(true);
+                    conn.setRequestProperty("Content-Type","application/x-www-form-urlencoded; charset=UTF-8");
+                    try(OutputStream output=conn.getOutputStream()){
+                        output.write(form.getBytes(StandardCharsets.UTF_8));
                     }
-            }
-            if(status>=300&&status<400)throw new Exception("网盘要求跳转或登录（HTTP "+status+"）。请尝试官方页面。");
-            if(status!=200)throw new Exception("网盘请求失败：HTTP "+status);
-            try(InputStream in=conn.getInputStream();ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
-                byte[] buf=new byte[8192];int n;
-                while((n=in.read(buf))!=-1){
-                    if(bytes.size()+n>1800000)throw new Exception("百度网盘响应过大，停止处理。");
-                    bytes.write(buf,0,n);
                 }
-                return bytes.toString("UTF-8");
-            }
-        } finally {conn.disconnect();}
+                int status=conn.getResponseCode();
+                Map<String,List<String>> headers=conn.getHeaderFields();
+                if(headers!=null)for(Map.Entry<String,List<String>> header:headers.entrySet()){
+                    if(header.getKey()!=null&&header.getKey().equalsIgnoreCase("Set-Cookie"))
+                        for(String val:header.getValue()){
+                            String part=val.split(";",2)[0];int eq=part.indexOf('=');
+                            if(eq>0)cookies.put(part.substring(0,eq),part.substring(eq+1));
+                        }
+                }
+                if(status==301||status==302||status==303||status==307||status==308){
+                    String location=conn.getHeaderField("Location");
+                    if(location==null||location.isEmpty())
+                        throw new Exception("百度网盘返回 HTTP "+status+"，但没有提供跳转地址。");
+                    URL next=new URL(url,location);
+                    String host=next.getHost().toLowerCase(java.util.Locale.ROOT);
+                    if(host.equals("passport.baidu.com")||host.equals("wappass.baidu.com")
+                        ||host.endsWith(".passport.baidu.com"))
+                        throw new Exception("百度网盘要求登录（HTTP "+status+"）。当前独立接口无法共享浏览器登录态，请先在官方页面验证分享是否可访问。");
+                    if(!"https".equalsIgnoreCase(next.getProtocol())||!host.equals("pan.baidu.com")
+                        ||(next.getPort()!=-1&&next.getPort()!=443)||next.getUserInfo()!=null)
+                        throw new Exception("网盘请求被重定向至其他站点（HTTP "+status+"），已停止以保护登录信息。");
+                    if(form!=null&&status!=307&&status!=308)
+                        throw new Exception("百度网盘接口 POST 请求跳转（HTTP "+status+"），可能需要登录或安全验证。");
+                    url=next;
+                    continue;
+                }
+                if(status!=200)throw new Exception("百度网盘请求失败：HTTP "+status);
+                try(InputStream in=conn.getInputStream();ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
+                    byte[] buf=new byte[8192];int n;
+                    while((n=in.read(buf))!=-1){
+                        if(bytes.size()+n>1800000)throw new Exception("百度网盘响应过大，停止处理。");
+                        bytes.write(buf,0,n);
+                    }
+                    return bytes.toString("UTF-8");
+                }
+            }finally{conn.disconnect();}
+        }
+        throw new Exception("百度网盘站内跳转超过5次，可能进入循环；请先用官方页面确认分享链接。");
     }
     private JSONObject json(String address,String form,String referer)throws Exception {
         String body=request(address,form,referer).trim();
@@ -149,10 +173,14 @@ public final class BaiduShare {
         surl=link.surl;official=link.official;
         listed.clear();shareId="";uk="";sign="";timestamp="";sekey="";
         String clean="https://pan.baidu.com/s/1"+surl;
-        String page=request(clean,null,"https://pan.baidu.com/");
+        String page;
+        try {page=request(clean,null,"https://pan.baidu.com/");}
+        catch(Exception ex){throw new Exception("分享页访问失败："+ex.getMessage());}
         if(!link.pwd.isEmpty()){
             String verifyUrl="https://pan.baidu.com/share/verify?"+query("surl",surl,"t",String.valueOf(System.currentTimeMillis()),"channel","chunlei","web","1","app_id","250528","clienttype","0");
-            JSONObject resp=json(verifyUrl,query("pwd",link.pwd,"vcode","","vcode_str",""),clean);
+            JSONObject resp;
+            try{resp=json(verifyUrl,query("pwd",link.pwd,"vcode","","vcode_str",""),clean);}
+            catch(Exception ex){throw new Exception("提取码校验请求失败："+ex.getMessage());}
             if(resp.optInt("errno",-999)!=0)throw new Exception("提取码校验失败："+failure(resp.optInt("errno",-999)));
             sekey=resp.optString("randsk","");
             try{sekey=java.net.URLDecoder.decode(sekey,"UTF-8");}catch(Exception ignored){}
@@ -164,7 +192,9 @@ public final class BaiduShare {
         timestamp=find(page,"timestamp","TIMESTAMP");
         String listUrl="https://pan.baidu.com/share/list?"+query("web","1","channel","chunlei","clienttype","0","app_id","250528","shorturl",surl,"page","1","num","100","root","1","dir","/");
         if(!sekey.isEmpty())listUrl+="&"+query("sekey",sekey);
-        JSONObject response=json(listUrl,null,clean);
+        JSONObject response;
+        try{response=json(listUrl,null,clean);}
+        catch(Exception ex){throw new Exception("文件列表请求失败："+ex.getMessage());}
         if(response.optInt("errno",-999)!=0)throw new Exception("文件列表读取失败："+failure(response.optInt("errno",-999)));
         shareId=response.optString("shareid",response.optString("share_id",shareId));
         uk=response.optString("uk",uk);
