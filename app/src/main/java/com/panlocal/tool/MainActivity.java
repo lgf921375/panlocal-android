@@ -84,7 +84,7 @@ public final class MainActivity extends Activity {
         LinearLayout hero=column();
         hero.setPadding(dp(20),dp(25),dp(20),dp(24));
         hero.setBackgroundColor(NAVY);outer.addView(hero);
-        hero.addView(text("PANLOCAL · 安卓本地版",12,0xffa5c4fc,true),params(0));
+        hero.addView(text("PANLOCAL · 安卓本地版 V0.4",12,0xffa5c4fc,true),params(0));
         hero.addView(text("百度网盘直链助手",25,Color.WHITE,true),params(10));
         hero.addView(text("粘贴分享链接 → 尝试读取文件 → 请求下载地址",13,0xffd0dcf0,false),params(10));
 
@@ -107,7 +107,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams gap=new LinearLayout.LayoutParams(0,dp(48),1);gap.leftMargin=dp(9);
         Button official=button("官方页面打开",false);actions.addView(official,gap);
         paste.setOnClickListener(v->paste());official.setOnClickListener(v->openOfficial());
-        Button login=button("百度官方登录（应用内）",false);
+        Button login=button("百度网盘官方页面 · 登录/转存",false);
         form.addView(login,params(9));
         login.setOnClickListener(v->openOfficialLogin());
 
@@ -177,6 +177,9 @@ public final class MainActivity extends Activity {
             if(!e.directory){
                 Button get=button("尝试提取此文件直链",true);item.addView(get,params(8));
                 get.setOnClickListener(v->getLink(e,item,get));
+                Button save=button("去百度网盘官方页面转存/下载",false);
+                item.addView(save,params(8));
+                save.setOnClickListener(v->openOfficialLogin());
             }
         }
     }

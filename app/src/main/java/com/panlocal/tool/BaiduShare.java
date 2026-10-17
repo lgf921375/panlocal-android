@@ -273,14 +273,49 @@ public final class BaiduShare {
         JSONObject result=json(url,form,official);
         if(result.optInt("errno",-999)!=0)throw new Exception("直链接口拒绝请求："+failure(result.optInt("errno",-999)));
         String direct=result.optString("dlink","");
-        JSONArray arr=result.optJSONArray("list");
-        if(direct.isEmpty()&&arr!=null&&arr.length()>0){
-            JSONObject first=arr.optJSONObject(0);
-            if(first!=null)direct=first.optString("dlink","");
+        if(direct.isEmpty()){
+            JSONObject data=result.optJSONObject("data");
+            if(data!=null)direct=data.optString("dlink","");
+            if(data!=null&&direct.isEmpty()){
+                JSONArray child=data.optJSONArray("list");
+                if(child!=null&&child.length()>0){
+                    JSONObject first=child.optJSONObject(0);
+                    if(first!=null)direct=first.optString("dlink","");
+                }
+            }
+        }
+        Object listShape=result.opt("list");
+        if(direct.isEmpty()&&listShape instanceof JSONArray){
+            JSONArray arr=(JSONArray)listShape;
+            if(arr.length()>0){
+                JSONObject first=arr.optJSONObject(0);
+                if(first!=null)direct=first.optString("dlink","");
+            }
+        }
+        if(direct.isEmpty()&&listShape instanceof JSONObject){
+            direct=((JSONObject)listShape).optString("dlink","");
+        }
+        if(direct.isEmpty()){
+            // Expose the schema, not raw server data: never print returned credentials or URLs.
+            if(listShape instanceof String){
+                throw new Exception("接口返回文本而不是直链（list=字符串）。"
+                    +"这个文件超过2GB，可能受到百度分享大文件限制；请在官方页面转存到自己网盘后下载。");
+            }
+            if(listShape instanceof JSONArray){
+                throw new Exception("接口返回文件列表，但没有 dlink（list=数组）。"
+                    +"请先在 APP 内登录百度网盘后重试；若仍失败，请到官方页面转存文件。");
+            }
+            if(listShape instanceof JSONObject){
+                throw new Exception("接口返回对象，但没有 dlink（list=对象）。"
+                    +"当前接口没有提供可下载地址，可尝试官方页面转存。");
+            }
+            throw new Exception("百度网盘未提供 dlink（list="
+                +(listShape==null||listShape==JSONObject.NULL?"无":listShape.getClass().getSimpleName())
+                +"）。可能需要登录、转存，或下载接口不支持此分享文件。");
         }
         URL target;
         try{target=new URL(direct);}
-        catch(Exception e){throw new Exception("网盘没有返回可识别的下载地址。");}
+        catch(Exception e){throw new Exception("接口返回 dlink 字段，但不是有效的下载 URL。");}
         if(!"https".equalsIgnoreCase(target.getProtocol())||target.getHost().isEmpty())
             throw new Exception("接口没有返回安全的 HTTPS 下载地址。");
         return direct;
