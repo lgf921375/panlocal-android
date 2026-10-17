@@ -102,3 +102,13 @@
 - 【官方文档】百度帐号 OAuth 授权码流程可以在无 Web Server 时使用 redirect_uri=oob 显示授权码，但 code 换 token 仍需要 client_secret。来源：https://openauth.baidu.com/doc/doc.html
 - 【历史资料，未验证】2021 年百度开发者中心问答展示过 response_type=token + redirect_uri=oob，当前账号、当前应用类型下是否仍可用尚未实测。来源：https://developer.baidu.com/question/detail.html?id=177
 - 【当前决定】现有 V0.7 APK 暂不修改；先完成回调所有权确认和密钥轮换，再决定安卓本地授权实现，不上传敏感信息。
+
+## 8. 2026-10-17 回调域名确认及授权架构约束
+
+- 【用户确认】`899yx.online` 为用户管理的域名，绑定其新加坡服务器。
+- 【未确认】`https://899yx.online/api/baidu/callback` 已有可工作的 HTTPS OAuth 回调处理程序；外部检索无法访问该 URL，不能据此判定服务端坏了。
+- 【官方 OAuth 文档】百度 2026-07 更新的授权码流程中，`response_type=code` 回调提供 `code` 和 `state`，服务器需要 `client_secret` 交换 Access Token，刷新 Access Token 也需要 `client_secret`。资料：https://openauth.baidu.com/doc/doc.html。
+- 【架构方案】最小服务端 OAuth 回调：仅承担授权开始/回调/换取与刷新凭证的安全工作，不托管安卓 APP 的网页前端。PanLocal 继续直接安装手机，文件搜索和下载功能独立实现；具体凭证返回方式需评估安全，不得在浏览器查询参数中传输完整令牌。
+- 【安全】百度后台截图公开了 SecretKey、SignKey，应先轮换已曝光密钥。新密钥只能由用户安全配置在服务器，不能提交公开仓库、截图或写入 APK。
+- 【实施边界】用户此前明确不部署网站，因此在得到用户同意使用现有服务器承载**仅 OAuth 的小服务**之前，不能进行服务端部署、更改服务或重启。不得影响现有项目。
+- 【未验证】服务器回调路由可用性、应用权限 scope、官方 App Key 的令牌实际授予情况、原始文件搜索与大文件 dlink 下载。
