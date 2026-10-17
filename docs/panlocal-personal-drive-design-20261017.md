@@ -93,3 +93,12 @@
 ## 6. 唯一阻塞问题
 
 用户需到开发者控制台确认：**App Key 所属应用类型及该应用当前被允许的 OAuth 授权方式 / 回调地址设置**。只需文字描述或遮挡密钥的页面截图；不应提供 Secret Key、Access Token、Refresh Token、Cookie。依据此信息从方案 A / B 决策，再进行首次 APK 实现。
+
+## 7. 2026-10-17 用户控制台截图核查（安全脱敏）
+
+- 【已确认】开发者应用显示“已上线、仅限个人场景使用”，应用类型为“软件”，应用分类为“其他”；已经配置 HTTPS OAuth 回调。
+- 【待确认】回调地址的域名是否由用户自己控制；在确认之前，不能启动授权测试，尤其不能将授权码发送到该回调地址。
+- 【安全提醒】截图显示了保密密钥的明文。应在官方控制台轮换 SecretKey 和 SignKey 等已暴露秘密；新值不进入 GitHub、聊天日志或 APK 常量。
+- 【官方文档】百度帐号 OAuth 授权码流程可以在无 Web Server 时使用 redirect_uri=oob 显示授权码，但 code 换 token 仍需要 client_secret。来源：https://openauth.baidu.com/doc/doc.html
+- 【历史资料，未验证】2021 年百度开发者中心问答展示过 response_type=token + redirect_uri=oob，当前账号、当前应用类型下是否仍可用尚未实测。来源：https://developer.baidu.com/question/detail.html?id=177
+- 【当前决定】现有 V0.7 APK 暂不修改；先完成回调所有权确认和密钥轮换，再决定安卓本地授权实现，不上传敏感信息。
