@@ -92,7 +92,7 @@ public final class MainActivity extends Activity {
         LinearLayout hero=column();
         hero.setPadding(dp(20),dp(25),dp(20),dp(24));
         hero.setBackgroundColor(NAVY);outer.addView(hero);
-        hero.addView(text("PANLOCAL · 安卓本地版 V1.1",12,0xffa5c4fc,true),params(0));
+        hero.addView(text("PANLOCAL · 安卓本地版 V1.2",12,0xffa5c4fc,true),params(0));
         hero.addView(text("百度网盘直链助手",25,Color.WHITE,true),params(10));
         hero.addView(text("粘贴分享链接 → 尝试读取文件 → 请求下载地址",13,0xffd0dcf0,false),params(10));
 
@@ -128,7 +128,7 @@ public final class MainActivity extends Activity {
         Button own=button("进入我的网盘 · 授权与搜索",true);
         myDrive.addView(own,params(10));
         own.setOnClickListener(v->startActivity(new Intent(this,MyDriveActivity.class)));
-        Button local=button("本地授权 · 下载权限检测 V1.1",false);
+        Button local=button("本地授权 · 密钥加密保存 V1.2",false);
         myDrive.addView(local,params(8));
         local.setOnClickListener(v->startActivity(new Intent(this,LocalDriveActivity.class)));
 

@@ -28,10 +28,10 @@ import java.util.UUID;
 
 /**
  * Single-user no-server OAuth compatibility experiment.
- * Supports official OAuth code/oob and requires owner-entered app SecretKey
- * ONLY at runtime; never embedded, logged, cached or persisted by this app.
- * Secret and one-time code are sent only over HTTPS to Baidu's official token API.
- * It does not capture Baidu-app cookies. Token stays in activity memory.
+ * Own-device app key and SecretKey can be saved with Android Keystore AES-GCM.
+ * No real SecretKey is compiled into the APK or uploaded to public GitHub.
+ * The one-time code and access token are not persisted in this Activity.
+ * Do not use for third-party shared accounts or public distributions.
  */
 public final class LocalDriveActivity extends Activity {
     private static final int NAVY=0xff14264c;
@@ -78,15 +78,21 @@ public final class LocalDriveActivity extends Activity {
         layout.setPadding(dp(18),dp(18),dp(18),dp(32));
         layout.setBackgroundColor(0xfff3f6fa);
         sc.addView(layout);setContentView(sc);
-        layout.addView(label("PanLocal V1.1 · 本地网盘下载权限检测",20),space(0));
-        layout.addView(label("已确认旧版免密网页授权在你手机的多个浏览器里不能正常显示。改用百度文档支持的 code + oob：先获取一次性授权码，再临时输入自己应用的 SecretKey 在本机兑换令牌。密钥不写入APK、日志或远程服务器，属于单用户实验用途。",13),space(10));
+        layout.addView(label("PanLocal V1.2 · 本机加密保存开发者密钥",20),space(0));
+        layout.addView(label("适合自己使用：首次输入 App Key 与已轮换的 SecretKey，并使用 Android Keystore 加密保存在这部手机。以后授权只需要一次性 code，不必每次输入开发者密钥。密钥不会编译进 APK，也不会传给第三方服务器。",13),space(10));
         layout.addView(label("第一步：输入你自己的 App Key（不是 SecretKey）",14),space(15));
         appKey=field("从百度开放平台复制 App Key",layout,false);
+        String storedKey=LocalCredentialVault.savedAppKey(this);
+        if(!storedKey.isEmpty())appKey.setText(storedKey);
         Button openCode=button("1. 打开百度官方授权页（获取 code）",layout);
         openCode.setOnClickListener(v->openCodeAuthorization());
-        layout.addView(label("授权完成后，百度页面应显示一次性 code。只在下方输入框粘贴；不要发送到聊天或截图。再输入已经轮换过的 SecretKey（密码框），在本手机直接向百度官方接口交换令牌。",13),space(13));
+        layout.addView(label("授权完成后，百度页面应显示一次性 code。只在本 APP 输入，不要发到聊天。首次使用请填写已轮换的 SecretKey 并点击“保存开发者密钥”；以后可将密钥框留空，APP 自动从本机加密存储读取。",13),space(13));
         authCodeEntry=field("百度官方显示的 code（授权码）",layout,true);
-        secretEntry=field("临时输入 SecretKey（不保存）",layout,true);
+        secretEntry=field("SecretKey（首次填写，保存后可留空）",layout,true);
+        Button keep=button("在此手机加密保存 App Key + SecretKey",layout);
+        keep.setOnClickListener(v->saveOwnerCredentials());
+        Button delete=button("删除本机保存的开发者密钥",layout);
+        delete.setOnClickListener(v->clearOwnerCredentials());
         Button exchange=button("2. 本机兑换令牌并验证账号",layout);
         exchange.setOnClickListener(v->exchangeCode());
         layout.addView(label("旧版隐式授权（仅保留作兼容性研究，不推荐）",14),space(20));
@@ -98,7 +104,9 @@ public final class LocalDriveActivity extends Activity {
         paste.setOnClickListener(v->pasteResult());
         Button verify=button("验证旧方式的 token",layout);
         verify.setOnClickListener(v->verify());
-        stateText=label("状态：未授权；此模式不依赖新加坡服务器。",14);
+        stateText=label(LocalCredentialVault.hasSavedSecret(this)?
+            "状态：已在本机加密保存开发者密钥；仍需取得一次性 code 授权。":
+            "状态：尚未保存密钥；首次请在本机填写并点击保存。",14);
         layout.addView(stateText,space(14));
         layout.addView(label("第三步：任一方式授权成功后搜索本人网盘文件",14),space(18));
         query=field("文件名关键词，例如 传奇",layout,false);
@@ -122,7 +130,32 @@ public final class LocalDriveActivity extends Activity {
             stateText.setText("已清除本机临时令牌；没有将其保存到文件。");
             DiagnosticLog.event("LOCALDRIVE","用户清除临时令牌");
         });
-        layout.addView(label("隐私：只访问百度官方 OAuth 与网盘接口；无需你自己的服务器。SecretKey 和 code 只临时保留在内存，不写入 APK、存储、日志；令牌只保留在当前页面内存。不要用屏幕录制、共享屏幕或把凭据发给聊天。",12),space(17));
+        layout.addView(label("隐私：App Key 和 SecretKey 仅在你选择保存后写入 APP 私有存储，其中 SecretKey 使用 Android Keystore AES-GCM 加密；code 与 Access Token 不会永久保存。不写 APK、GitHub 或 TXT 日志。换手机、卸载应用或清除数据会丢失本机密钥。请避免录屏或分享凭据。",12),space(17));
+    }
+    private void saveOwnerCredentials(){
+        final String key=appKey.getText().toString().trim();
+        final String secret=secretEntry.getText().toString().trim();
+        secretEntry.setText("");
+        try{
+            LocalCredentialVault.save(this,key,secret);
+            DiagnosticLog.event("LOCALDRIVE","developerCredentialsSavedLocally=true (no values)");
+            stateText.setText("已将开发者密钥加密保存在本机，后续 SecretKey 输入框可留空；仍需获取一次性 code。");
+        }catch(Exception e){
+            DiagnosticLog.event("LOCALDRIVE","developerCredentialsSaveFailed="+e.getClass().getSimpleName());
+            stateText.setText("本机保存失败，请检查输入格式或设备密钥库。不会保存明文；错误类型："+e.getClass().getSimpleName());
+        }
+    }
+    private void clearOwnerCredentials(){
+        try{
+            LocalCredentialVault.clear(this);
+            appKey.setText("");
+            secretEntry.setText("");
+            DiagnosticLog.event("LOCALDRIVE","developerCredentialsCleared=true");
+            stateText.setText("本机已保存的 App Key 和 SecretKey 已清除。当前临时 OAuth 令牌仍可用；需另外点击清除临时授权。");
+        }catch(Exception e){
+            DiagnosticLog.event("LOCALDRIVE","developerCredentialsClearFailed="+e.getClass().getSimpleName());
+            stateText.setText("本机密钥清除失败，请尝试清除 APP 数据；错误类型："+e.getClass().getSimpleName());
+        }
     }
     private void openCodeAuthorization(){
         String key=appKey.getText().toString().trim();
@@ -140,9 +173,19 @@ public final class LocalDriveActivity extends Activity {
     private void exchangeCode(){
         final String key=appKey.getText().toString().trim();
         final String code=authCodeEntry.getText().toString().trim();
-        final String secret=secretEntry.getText().toString().trim();
+        String suppliedSecret=secretEntry.getText().toString().trim();
         authCodeEntry.setText("");
         secretEntry.setText("");
+        if(suppliedSecret.isEmpty()){
+            try{
+                suppliedSecret=LocalCredentialVault.secretFor(this,key);
+            }catch(Exception e){
+                DiagnosticLog.event("LOCALDRIVE","developerCredentialDecryptFailed="+e.getClass().getSimpleName());
+                stateText.setText("本机密钥不可解密。请删除保存的密钥，重新输入已轮换的 SecretKey。");
+                return;
+            }
+        }
+        final String secret=suppliedSecret;
         if(!key.matches("[A-Za-z0-9_-]{8,128}")||!code.matches("[A-Za-z0-9._-]{8,512}")||!secret.matches("[A-Za-z0-9._~-]{12,512}")){
             stateText.setText("App Key、code 或 SecretKey 格式错误。请确认是百度官方签发的授权码以及已轮换过的密钥。");return;
         }
