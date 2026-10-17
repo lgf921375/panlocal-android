@@ -39,6 +39,7 @@ public final class BaiduShare {
         sessionCookie=cookie==null?"":cookie;
         sessionBdstoken=bdstoken==null?"":bdstoken;
         sessionJsToken=jsToken==null?"":jsToken;
+        DiagnosticLog.event("AUTH","官方页面会话同步: cookiePresent="+!sessionCookie.isEmpty()+" bdstokenPresent="+!sessionBdstoken.isEmpty()+" jsTokenPresent="+!sessionJsToken.isEmpty());
     }
     private static synchronized String[] officialSession(){
         return new String[]{sessionCookie,sessionBdstoken,sessionJsToken};
@@ -47,6 +48,7 @@ public final class BaiduShare {
     private void loadOfficialSession(){
         String[] auth=officialSession();
         bdstoken=auth[1];jsToken=auth[2];
+        DiagnosticLog.event("AUTH","加载会话: cookiePresent="+!auth[0].isEmpty()+" bdstokenPresent="+!bdstoken.isEmpty()+" jsTokenPresent="+!jsToken.isEmpty());
         if(!auth[0].isEmpty())for(String raw:auth[0].split(";")){
             String part=raw.trim();int idx=part.indexOf('=');
             if(idx>0&&idx<part.length()-1)cookies.put(part.substring(0,idx),part.substring(idx+1));
@@ -71,6 +73,7 @@ public final class BaiduShare {
         JSONObject data=result.optJSONObject("data");if(data==null)data=result;
         String returnedSign=data.optString("sign","");
         String returnedTime=data.optString("timestamp","");
+        DiagnosticLog.event("SIGN","tplconfig signPresent="+!returnedSign.isEmpty()+" timestampPresent="+!returnedTime.isEmpty());
         if(!returnedSign.isEmpty()&&!returnedTime.isEmpty()){
             sign=returnedSign;timestamp=returnedTime;
             return;
@@ -137,6 +140,8 @@ public final class BaiduShare {
     private String request(String address,String form,String referer)throws Exception {
         URL url=new URL(address);
         for(int hop=0;hop<=5;hop++){
+            final String endpoint=DiagnosticLog.endpoint(url);
+            DiagnosticLog.event("HTTP",endpoint+" method="+(form==null?"GET":"POST")+" hop="+hop+" credentialsCount="+cookies.size());
             if(!"https".equalsIgnoreCase(url.getProtocol())
                 ||!"pan.baidu.com".equalsIgnoreCase(url.getHost())
                 ||(url.getPort()!=-1&&url.getPort()!=443)
@@ -170,6 +175,7 @@ public final class BaiduShare {
                     }
                 }
                 int status=conn.getResponseCode();
+                DiagnosticLog.event("HTTP",endpoint+" status="+status);
                 Map<String,List<String>> headers=conn.getHeaderFields();
                 if(headers!=null)for(Map.Entry<String,List<String>> header:headers.entrySet()){
                     if(header.getKey()!=null&&header.getKey().equalsIgnoreCase("Set-Cookie"))
@@ -184,6 +190,7 @@ public final class BaiduShare {
                         throw new Exception("百度网盘返回 HTTP "+status+"，但没有提供跳转地址。");
                     URL next=new URL(url,location);
                     String host=next.getHost().toLowerCase(java.util.Locale.ROOT);
+                    DiagnosticLog.event("REDIRECT",endpoint+" status="+status+" destination="+(host.equals("pan.baidu.com")?"pan.baidu.com":host.endsWith(".baidu.com")?"other-baidu-host":"non-baidu")+" sameEndpoint="+DiagnosticLog.endpoint(next).equals(endpoint));
                     if(host.equals("passport.baidu.com")||host.equals("wappass.baidu.com")
                         ||host.endsWith(".passport.baidu.com"))
                         throw new Exception("百度网盘要求登录（HTTP "+status+"）。当前独立接口无法共享浏览器登录态，请先在官方页面验证分享是否可访问。");
@@ -202,6 +209,7 @@ public final class BaiduShare {
                         if(bytes.size()+n>1800000)throw new Exception("百度网盘响应过大，停止处理。");
                         bytes.write(buf,0,n);
                     }
+                    DiagnosticLog.event("HTTP",endpoint+" responseBytes="+bytes.size()+" type=text");
                     return bytes.toString("UTF-8");
                 }
             }finally{conn.disconnect();}
@@ -210,13 +218,26 @@ public final class BaiduShare {
     }
     private JSONObject json(String address,String form,String referer)throws Exception {
         String body=request(address,form,referer).trim();
-        try{return new JSONObject(body);}
-        catch(Exception e){throw new Exception("百度网盘没有返回可识别数据；可能需要登录、验证码或接口已经变化。");}
+        try{
+            JSONObject obj=new JSONObject(body);
+            Object shape=obj.opt("list");
+            JSONObject data=obj.optJSONObject("data");
+            String schema="errno="+(obj.has("errno")?String.valueOf(obj.optInt("errno",-999)):"missing")
+                +" listType="+DiagnosticLog.listType(shape)
+                +" hasTopDlink="+obj.has("dlink")
+                +" hasData="+(data!=null);
+            DiagnosticLog.event("JSON",DiagnosticLog.endpoint(new URL(address))+" "+schema);
+            return obj;
+        }catch(Exception e){
+            DiagnosticLog.event("JSON","无法解析 JSON，正文未记录");
+            throw new Exception("百度网盘没有返回可识别数据；可能需要登录、验证码或接口已经变化。");
+        }
     }
 
     public synchronized List<Entry> inspect(String raw,String manual)throws Exception {
         Link link=parse(raw,manual);
         surl=link.surl;official=link.official;
+        DiagnosticLog.event("SHARE","解析开始: pwdPresent="+!link.pwd.isEmpty()+"; 分享链接不写入日志");
         listed.clear();shareId="";uk="";sign="";timestamp="";sekey="";
         sharePageRedirected=false;
         loadOfficialSession();
@@ -229,6 +250,7 @@ public final class BaiduShare {
             // Keep authentication/redirect diagnostics, but do not stop before trying those endpoints.
             if(reason!=null&&reason.contains("百度网盘要求登录（HTTP")){
                 sharePageRedirected=true;
+                DiagnosticLog.event("SHARE","分享页触发登录跳转，继续尝试公开接口");
             }else{
                 throw new Exception("分享页访问失败："+reason);
             }
@@ -238,6 +260,7 @@ public final class BaiduShare {
             JSONObject resp;
             try{resp=json(verifyUrl,query("pwd",link.pwd,"vcode","","vcode_str",""),clean);}
             catch(Exception ex){throw new Exception("提取码校验请求失败："+ex.getMessage());}
+            DiagnosticLog.event("VERIFY","提取码校验 errno="+resp.optInt("errno",-999));
             if(resp.optInt("errno",-999)!=0)throw new Exception("提取码校验失败："+failure(resp.optInt("errno",-999)));
             sekey=resp.optString("randsk","");
             try{sekey=java.net.URLDecoder.decode(sekey,"UTF-8");}catch(Exception ignored){}
@@ -253,6 +276,7 @@ public final class BaiduShare {
         JSONObject response;
         try{response=json(listUrl,null,clean);}
         catch(Exception ex){throw new Exception("文件列表请求失败："+ex.getMessage());}
+        DiagnosticLog.event("LIST","读取接口 errno="+response.optInt("errno",-999));
         if(response.optInt("errno",-999)!=0)throw new Exception("文件列表读取失败："+failure(response.optInt("errno",-999)));
         shareId=response.optString("shareid",response.optString("share_id",shareId));
         uk=response.optString("uk",uk);
@@ -274,6 +298,7 @@ public final class BaiduShare {
             Entry e=new Entry(id,f.optString("server_filename","未命名文件"),f.optLong("size",0),f.optInt("isdir",0)==1);
             listed.put(id,e);out.add(e);
         }
+        DiagnosticLog.event("LIST","解析完成 fileCount="+out.size()+" shareIdPresent="+!shareId.isEmpty()+" ukPresent="+!uk.isEmpty());
         return out;
     }
 
@@ -283,6 +308,7 @@ public final class BaiduShare {
         if(file.directory)throw new Exception("文件夹不能直接提取下载链接。");
         if(shareId.isEmpty()||uk.isEmpty())
             throw new Exception("缺少 shareid 或 uk，请重新读取文件列表。");
+        DiagnosticLog.event("DIRECT","提取开始 sizeMiB="+(file.size/1048576L)+" shareIdPresent="+!shareId.isEmpty()+" ukPresent="+!uk.isEmpty());
         fillSignature();
         String url="https://pan.baidu.com/api/sharedownload?"+query("sign",sign,"timestamp",timestamp,"app_id","250528","channel","chunlei","clienttype","0","web","1");
         if(!bdstoken.isEmpty())url+="&"+query("bdstoken",bdstoken);
@@ -292,6 +318,7 @@ public final class BaiduShare {
         String form=query("encrypt","0","product","share","uk",uk,"primaryid",shareId,"fid_list","["+id+"]");
         if(!sekey.isEmpty())form+="&"+query("extra",new JSONObject().put("sekey",sekey).toString());
         JSONObject result=json(url,form,official);
+        DiagnosticLog.event("DIRECT","sharedownload errno="+result.optInt("errno",-999)+" listType="+DiagnosticLog.listType(result.opt("list"))+" dataPresent="+(result.optJSONObject("data")!=null));
         if(result.optInt("errno",-999)!=0)throw new Exception("直链接口拒绝请求："+failure(result.optInt("errno",-999)));
         String direct=result.optString("dlink","");
         if(direct.isEmpty()){
@@ -339,6 +366,7 @@ public final class BaiduShare {
         catch(Exception e){throw new Exception("接口返回 dlink 字段，但不是有效的下载 URL。");}
         if(!"https".equalsIgnoreCase(target.getProtocol())||target.getHost().isEmpty())
             throw new Exception("接口没有返回安全的 HTTPS 下载地址。");
+        DiagnosticLog.event("DIRECT","dlinkPresent=true URL 内容不写入日志");
         return direct;
     }
 }

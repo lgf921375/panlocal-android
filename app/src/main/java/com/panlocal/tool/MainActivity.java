@@ -28,6 +28,7 @@ public final class MainActivity extends Activity {
     private static final int NAVY=0xff152442, BLUE=0xff2163e7, GREY=0xff596c88, RED=0xffae3333, GREEN=0xff146947;
     private EditText shareInput,codeInput;
     private TextView status;
+    private TextView diagnosticText;
     private LinearLayout results;
     private Button readButton;
     private BaiduShare active;
@@ -84,7 +85,7 @@ public final class MainActivity extends Activity {
         LinearLayout hero=column();
         hero.setPadding(dp(20),dp(25),dp(20),dp(24));
         hero.setBackgroundColor(NAVY);outer.addView(hero);
-        hero.addView(text("PANLOCAL · 安卓本地版 V0.5",12,0xffa5c4fc,true),params(0));
+        hero.addView(text("PANLOCAL · 安卓本地版 V0.6",12,0xffa5c4fc,true),params(0));
         hero.addView(text("百度网盘直链助手",25,Color.WHITE,true),params(10));
         hero.addView(text("粘贴分享链接 → 尝试读取文件 → 请求下载地址",13,0xffd0dcf0,false),params(10));
 
@@ -119,6 +120,44 @@ public final class MainActivity extends Activity {
         status=text("等待分享链接。",14,GREY,false);resultCard.addView(status,params(12));
         results=column();resultCard.addView(results,params(10));
 
+
+        LinearLayout traceCard=column();
+        traceCard.setBackground(background(Color.WHITE,14));
+        traceCard.setPadding(dp(16),dp(16),dp(16),dp(18));
+        content.addView(traceCard,params(16));
+        traceCard.addView(text("03  本地诊断日志",18,NAVY,true),params(0));
+        traceCard.addView(text("先开启诊断，再依次解析、在官方页面登录/同步、重试提取。只记录阶段、状态码、返回结构；不会记录账号密码、Cookie、令牌和完整链接。请自行选择是否分享。",12,GREY,false),params(8));
+        Button traceStart=button("开始诊断（清空旧记录）",true);
+        traceCard.addView(traceStart,params(12));
+        traceStart.setOnClickListener(v->{DiagnosticLog.start();refreshDiagnostics();toast("已开始记录核心请求");});
+        LinearLayout traceActions=new LinearLayout(this);
+        traceActions.setOrientation(LinearLayout.HORIZONTAL);
+        traceCard.addView(traceActions,params(8));
+        Button traceCopy=button("复制完整日志",false);
+        traceActions.addView(traceCopy,new LinearLayout.LayoutParams(0,dp(48),1));
+        LinearLayout.LayoutParams traceGap=new LinearLayout.LayoutParams(0,dp(48),1);
+        traceGap.leftMargin=dp(8);
+        Button traceShare=button("分享日志",false);
+        traceActions.addView(traceShare,traceGap);
+        traceCopy.setOnClickListener(v->{
+            ClipboardManager board=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+            if(board!=null){board.setPrimaryClip(ClipData.newPlainText("PanLocal 诊断日志",DiagnosticLog.all()));toast("日志已复制，可粘贴到 ChatGPT");}
+        });
+        traceShare.setOnClickListener(v->{
+            Intent send=new Intent(Intent.ACTION_SEND);
+            send.setType("text/plain");
+            send.putExtra(Intent.EXTRA_TEXT,DiagnosticLog.all());
+            startActivity(Intent.createChooser(send,"将已脱敏的诊断日志分享给 ChatGPT"));
+        });
+        Button refresh=button("刷新日志显示",false);
+        traceCard.addView(refresh,params(8));
+        refresh.setOnClickListener(v->refreshDiagnostics());
+        diagnosticText=text("尚未开启诊断。",11,GREY,false);
+        diagnosticText.setTypeface(Typeface.MONOSPACE);
+        diagnosticText.setTextIsSelectable(true);
+        traceCard.addView(diagnosticText,params(10));
+        refreshDiagnostics();
+
         LinearLayout help=column();help.setPadding(dp(16),dp(16),dp(16),dp(18));
         help.setBackground(background(Color.WHITE,14));content.addView(help,params(16));
         help.addView(text("说明",16,NAVY,true),params(0));
@@ -131,6 +170,13 @@ public final class MainActivity extends Activity {
             String s=incoming.getStringExtra(Intent.EXTRA_TEXT);
             if(s!=null)shareInput.setText(s);
         }
+    }
+    @Override protected void onResume(){
+        super.onResume();
+        refreshDiagnostics();
+    }
+    private void refreshDiagnostics(){
+        if(diagnosticText!=null)diagnosticText.setText(DiagnosticLog.tail(55));
     }
     private void paste(){
         ClipboardManager clipboard=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
@@ -145,6 +191,7 @@ public final class MainActivity extends Activity {
         String raw=shareInput.getText().toString(),code=codeInput.getText().toString();
         try{BaiduShare.parse(raw,code);}
         catch(Exception e){note(e.getMessage(),RED);return;}
+        DiagnosticLog.event("UI","用户发起文件列表解析");
         results.removeAllViews();note("正在联系百度网盘读取文件列表……",GREY);
         setBusy(true);
         InputMethodManager keyboard=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
@@ -153,9 +200,11 @@ public final class MainActivity extends Activity {
             BaiduShare client=new BaiduShare();
             try{
                 List<BaiduShare.Entry> entries=client.inspect(raw,code);
-                runOnUiThread(()->{active=client;setBusy(false);showEntries(entries);});
+                DiagnosticLog.event("UI","文件列表成功 count="+entries.size());
+                runOnUiThread(()->{active=client;setBusy(false);showEntries(entries);refreshDiagnostics();});
             }catch(Exception e){
-                runOnUiThread(()->{setBusy(false);note("未能读取文件列表："+safe(e),RED);});
+                DiagnosticLog.event("UI","文件列表失败 exceptionType="+e.getClass().getSimpleName());
+                runOnUiThread(()->{setBusy(false);note("未能读取文件列表："+safe(e),RED);refreshDiagnostics();});
             }
         },"pan-lookup").start();
     }
@@ -187,11 +236,15 @@ public final class MainActivity extends Activity {
         if(busy||active==null)return;
         setBusy(true);button.setEnabled(false);button.setText("请求中…");
         BaiduShare client=active;
+        DiagnosticLog.event("UI","用户发起单文件直链提取");
+        refreshDiagnostics();
         new Thread(()->{
             try{
                 String link=client.obtain(e.id);
                 runOnUiThread(()->{
                     setBusy(false);button.setEnabled(true);button.setText("再次尝试提取");
+                    DiagnosticLog.event("UI","收到下载地址，未验证下载可用性");
+                    refreshDiagnostics();
                     note("接口返回了下载地址，尚未验证实际能否下载。",GREEN);
                     item.addView(text(link,12,GREY,false),params(9));
                     Button copy=button("复制下载地址",false);item.addView(copy,params(8));
@@ -204,6 +257,8 @@ public final class MainActivity extends Activity {
             }catch(Exception ex){
                 runOnUiThread(()->{
                     setBusy(false);button.setEnabled(true);button.setText("再次尝试提取");
+                    DiagnosticLog.event("UI","直链提取失败 exceptionType="+ex.getClass().getSimpleName());
+                    refreshDiagnostics();
                     note("未取得直链："+safe(ex),RED);
                 });
             }
@@ -213,6 +268,8 @@ public final class MainActivity extends Activity {
         String url="https://pan.baidu.com/";
         try{url=BaiduShare.parse(shareInput.getText().toString(),codeInput.getText().toString()).official;}
         catch(Exception ignored){}
+        DiagnosticLog.event("UI","用户打开 APP 内百度官方页面");
+        refreshDiagnostics();
         Intent i=new Intent(this,BaiduLoginActivity.class);
         i.putExtra("official_url",url);
         startActivity(i);

@@ -57,9 +57,23 @@ public final class BaiduLoginActivity extends Activity {
         settings.setJavaScriptCanOpenWindowsAutomatically(false);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web,false);
+        DiagnosticLog.event("WEBVIEW","打开官方页面，等待主框架加载");
         web.setWebViewClient(new WebViewClient(){
+            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap favicon){
+                DiagnosticLog.event("WEBVIEW","页面开始加载 host="+DiagnosticLog.webHost(Uri.parse(url)));
+            }
+            @Override public void onPageFinished(WebView view,String url){
+                DiagnosticLog.event("WEBVIEW","页面加载完成 host="+DiagnosticLog.webHost(Uri.parse(url)));
+            }
+            @Override public void onReceivedError(WebView view,WebResourceRequest req,android.webkit.WebResourceError error){
+                if(req.isForMainFrame())DiagnosticLog.event("WEBVIEW","主框架网络错误 code="+error.getErrorCode()+" host="+DiagnosticLog.webHost(req.getUrl()));
+            }
+            @Override public void onReceivedHttpError(WebView view,WebResourceRequest req,android.webkit.WebResourceResponse response){
+                if(req.isForMainFrame())DiagnosticLog.event("WEBVIEW","主框架 HTTP="+response.getStatusCode()+" host="+DiagnosticLog.webHost(req.getUrl()));
+            }
             @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest req){
                 if(allowed(req.getUrl()))return false;
+                DiagnosticLog.event("WEBVIEW","拦截非允许域名的主框架跳转");
                 Toast.makeText(BaiduLoginActivity.this,"仅允许访问百度官方 HTTPS 网站",Toast.LENGTH_LONG).show();
                 return true;
             }
@@ -76,6 +90,7 @@ public final class BaiduLoginActivity extends Activity {
         String page=web.getUrl();
         Uri uri;
         try{uri=Uri.parse(page);}catch(Exception ex){uri=null;}
+        DiagnosticLog.event("AUTH","用户尝试同步会话, currentHost="+DiagnosticLog.webHost(uri));
         if(uri==null||!"pan.baidu.com".equalsIgnoreCase(uri.getHost())){
             Toast.makeText(this,"请先返回百度网盘分享页，再点击同步会话",Toast.LENGTH_LONG).show();
             return;
@@ -91,6 +106,7 @@ public final class BaiduLoginActivity extends Activity {
                 JSONObject data=new JSONObject(str);
                 bt=data.optString("bdstoken","");jt=data.optString("jsToken","");
             }catch(Exception ignored){}
+            DiagnosticLog.event("AUTH","百度页面返回: cookiePresent="+!cookies.isEmpty()+" bdstokenPresent="+!bt.isEmpty()+" jsTokenPresent="+!jt.isEmpty());
             BaiduShare.rememberOfficialSession(cookies,bt,jt);
             Toast.makeText(this,"页面会话已读取，但不代表已验证账号登录；请返回重新解析",Toast.LENGTH_LONG).show();
             finish();
