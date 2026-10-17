@@ -92,7 +92,7 @@ public final class MainActivity extends Activity {
         LinearLayout hero=column();
         hero.setPadding(dp(20),dp(25),dp(20),dp(24));
         hero.setBackgroundColor(NAVY);outer.addView(hero);
-        hero.addView(text("PANLOCAL · 安卓本地版 V0.7",12,0xffa5c4fc,true),params(0));
+        hero.addView(text("PANLOCAL · 安卓本地版 V0.8",12,0xffa5c4fc,true),params(0));
         hero.addView(text("百度网盘直链助手",25,Color.WHITE,true),params(10));
         hero.addView(text("粘贴分享链接 → 尝试读取文件 → 请求下载地址",13,0xffd0dcf0,false),params(10));
 
@@ -119,11 +119,21 @@ public final class MainActivity extends Activity {
         form.addView(login,params(9));
         login.setOnClickListener(v->openOfficialLogin());
 
+        LinearLayout myDrive=column();
+        myDrive.setBackground(background(Color.WHITE,14));
+        myDrive.setPadding(dp(16),dp(16),dp(16),dp(18));
+        content.addView(myDrive,params(14));
+        myDrive.addView(text("02  我的网盘（OAuth 测试入口）",18,NAVY,true),params(0));
+        myDrive.addView(text("原始文件已在自己的网盘，无需转存。个人文件模式需要自有服务器的 OAuth Bridge；服务器未部署前只能进行连通性检查，不代表授权或下载成功。",13,GREY,false),params(9));
+        Button own=button("进入我的网盘 · 授权与搜索",true);
+        myDrive.addView(own,params(10));
+        own.setOnClickListener(v->startActivity(new Intent(this,MyDriveActivity.class)));
+
         LinearLayout resultCard=column();
         resultCard.setBackground(background(Color.WHITE,14));
         resultCard.setPadding(dp(16),dp(16),dp(16),dp(18));
         content.addView(resultCard,params(16));
-        resultCard.addView(text("02  解析结果",18,NAVY,true),params(0));
+        resultCard.addView(text("03  分享解析结果",18,NAVY,true),params(0));
         status=text("等待分享链接。",14,GREY,false);resultCard.addView(status,params(12));
         results=column();resultCard.addView(results,params(10));
 
@@ -132,7 +142,7 @@ public final class MainActivity extends Activity {
         traceCard.setBackground(background(Color.WHITE,14));
         traceCard.setPadding(dp(16),dp(16),dp(16),dp(18));
         content.addView(traceCard,params(16));
-        traceCard.addView(text("03  本地诊断日志",18,NAVY,true),params(0));
+        traceCard.addView(text("04  本地诊断日志",18,NAVY,true),params(0));
         traceCard.addView(text("开启后自动在APP私有目录保留完整日志，重启APP仍可恢复。点击保存TXT可选择手机文件夹，不需要存储权限。最多约2MB，重新开始会清空旧记录。不会记录密码、令牌和完整链接。",12,GREY,false),params(8));
         Button traceStart=button("开始诊断（清空旧记录）",true);
         traceCard.addView(traceStart,params(12));
@@ -171,7 +181,7 @@ public final class MainActivity extends Activity {
         LinearLayout help=column();help.setPadding(dp(16),dp(16),dp(16),dp(18));
         help.setBackground(background(Color.WHITE,14));content.addView(help,params(16));
         help.addView(text("说明",16,NAVY,true),params(0));
-        help.addView(text("本工具仅通过手机直接尝试访问百度网盘官方接口，不需要网站、Termux 或独立服务器。\n\n这是独立实验实现，不是 LinkSwift 官方 APP。分享页跳转登录时仍会尝试公开分享列表接口。APP 可读取其内置百度官方页面的会话，但这并不证明账号已经登录成功。不会读取其他浏览器或百度 APP 的登录凭证。获取到地址也不意味着可用或不限速。请不要在任何第三方页面提交账号密码。",13,GREY,false),params(10));
+        help.addView(text("分享模式直接通过手机连接百度官方接口；新增“我的网盘”模式为了保护 SecretKey，需由你控制的新加坡服务器运行独立 OAuth Bridge（尚未部署）。不需要 Termux 或网页前端。\n\n这是独立实验实现，不是 LinkSwift 官方 APP。分享页跳转登录时仍会尝试公开分享列表接口。APP 可读取其内置百度官方页面的会话，但这并不证明账号已经登录成功。不会读取其他浏览器或百度 APP 的登录凭证。获取到地址也不意味着可用或不限速。请不要在任何第三方页面提交账号密码。",13,GREY,false),params(10));
         Button github=button("查看 LinkSwift 官方源码",false);
         help.addView(github,params(12));
         github.setOnClickListener(v->openUrl("https://github.com/hmjz100/LinkSwift"));
