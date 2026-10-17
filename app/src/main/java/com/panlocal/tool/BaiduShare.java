@@ -33,6 +33,50 @@ public final class BaiduShare {
             this.official="https://pan.baidu.com/s/1"+surl+(pwd.isEmpty()?"":"?pwd="+pwd);
         }
     }
+    // Browser session stays in this Android process; never sent to an external service.
+    private static String sessionCookie="",sessionBdstoken="",sessionJsToken="";
+    public static synchronized void rememberOfficialSession(String cookie,String bdstoken,String jsToken) {
+        sessionCookie=cookie==null?"":cookie;
+        sessionBdstoken=bdstoken==null?"":bdstoken;
+        sessionJsToken=jsToken==null?"":jsToken;
+    }
+    private static synchronized String[] officialSession(){
+        return new String[]{sessionCookie,sessionBdstoken,sessionJsToken};
+    }
+    private String bdstoken="",jsToken="";
+    private void loadOfficialSession(){
+        String[] auth=officialSession();
+        bdstoken=auth[1];jsToken=auth[2];
+        if(!auth[0].isEmpty())for(String raw:auth[0].split(";")){
+            String part=raw.trim();int idx=part.indexOf('=');
+            if(idx>0&&idx<part.length()-1)cookies.put(part.substring(0,idx),part.substring(idx+1));
+        }
+    }
+    private void fillSignature()throws Exception {
+        // LinkSwift retrieves fresh share signatures through /share/tplconfig.
+        String url="https://pan.baidu.com/share/tplconfig?"+query(
+            "fields","sign,timestamp","channel","chunlei","web","1","app_id","250528",
+            "clienttype","0","view_mode","1","surl","1"+surl);
+        if(!bdstoken.isEmpty())url+="&"+query("bdstoken",bdstoken);
+        String baiduid=cookies.get("BAIDUID");
+        if(baiduid!=null&&!baiduid.isEmpty()){
+            String logid=java.util.Base64.getEncoder().encodeToString(baiduid.getBytes(StandardCharsets.UTF_8));
+            url+="&"+query("logid",logid);
+        }
+        JSONObject result;
+        try{result=json(url,null,official);}
+        catch(Exception e){throw new Exception("获取下载签名失败："+e.getMessage());}
+        int errno=result.optInt("errno",0);
+        if(errno!=0)throw new Exception("签名接口拒绝请求："+failure(errno));
+        JSONObject data=result.optJSONObject("data");if(data==null)data=result;
+        String returnedSign=data.optString("sign","");
+        String returnedTime=data.optString("timestamp","");
+        if(!returnedSign.isEmpty()&&!returnedTime.isEmpty()){
+            sign=returnedSign;timestamp=returnedTime;
+            return;
+        }
+        throw new Exception("签名接口未提供 sign/timestamp；请先在 APP 内打开百度官方登录页并登录后重试。");
+    }
     private static final String USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36";
     private static final Pattern SHARE=Pattern.compile("https?://pan\\.baidu\\.com/s/1([A-Za-z0-9_-]{8,})",Pattern.CASE_INSENSITIVE);
     private static final Pattern CODE=Pattern.compile("(?:提取码|访问码|密码)\\s*[:：]\\s*([A-Za-z0-9]{4,8})");
@@ -172,6 +216,7 @@ public final class BaiduShare {
         Link link=parse(raw,manual);
         surl=link.surl;official=link.official;
         listed.clear();shareId="";uk="";sign="";timestamp="";sekey="";
+        loadOfficialSession();
         String clean="https://pan.baidu.com/s/1"+surl;
         String page;
         try {page=request(clean,null,"https://pan.baidu.com/");}
@@ -186,6 +231,7 @@ public final class BaiduShare {
             try{sekey=java.net.URLDecoder.decode(sekey,"UTF-8");}catch(Exception ignored){}
             try{page=request(clean,null,clean);}catch(Exception ignored){}
         }
+        if(bdstoken.isEmpty())bdstoken=find(page,"bdstoken","BDSTOKEN");
         shareId=find(page,"shareid","SHARE_ID","share_id");
         uk=find(page,"uk","SHARE_UK");
         sign=find(page,"sign","SIGN");
@@ -214,9 +260,14 @@ public final class BaiduShare {
         Entry file=listed.get(id);
         if(file==null)throw new Exception("文件列表已失效，请重新解析。");
         if(file.directory)throw new Exception("文件夹不能直接提取下载链接。");
-        if(shareId.isEmpty()||uk.isEmpty()||sign.isEmpty()||timestamp.isEmpty())
-            throw new Exception("分享页面未提供必要下载签名，可能需要登录百度网盘。");
+        if(shareId.isEmpty()||uk.isEmpty())
+            throw new Exception("缺少 shareid 或 uk，请重新读取文件列表。");
+        fillSignature();
         String url="https://pan.baidu.com/api/sharedownload?"+query("sign",sign,"timestamp",timestamp,"app_id","250528","channel","chunlei","clienttype","0","web","1");
+        if(!bdstoken.isEmpty())url+="&"+query("bdstoken",bdstoken);
+        if(!jsToken.isEmpty())url+="&"+query("jsToken",jsToken);
+        String baiduid=cookies.get("BAIDUID");
+        if(baiduid!=null&&!baiduid.isEmpty())url+="&"+query("logid",java.util.Base64.getEncoder().encodeToString(baiduid.getBytes(StandardCharsets.UTF_8)));
         String form=query("encrypt","0","product","share","uk",uk,"primaryid",shareId,"fid_list","["+id+"]");
         if(!sekey.isEmpty())form+="&"+query("extra",new JSONObject().put("sekey",sekey).toString());
         JSONObject result=json(url,form,official);

@@ -107,6 +107,9 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams gap=new LinearLayout.LayoutParams(0,dp(48),1);gap.leftMargin=dp(9);
         Button official=button("官方页面打开",false);actions.addView(official,gap);
         paste.setOnClickListener(v->paste());official.setOnClickListener(v->openOfficial());
+        Button login=button("百度官方登录（应用内）",false);
+        form.addView(login,params(9));
+        login.setOnClickListener(v->openOfficialLogin());
 
         LinearLayout resultCard=column();
         resultCard.setBackground(background(Color.WHITE,14));
@@ -119,7 +122,7 @@ public final class MainActivity extends Activity {
         LinearLayout help=column();help.setPadding(dp(16),dp(16),dp(16),dp(18));
         help.setBackground(background(Color.WHITE,14));content.addView(help,params(16));
         help.addView(text("说明",16,NAVY,true),params(0));
-        help.addView(text("本工具仅通过手机直接尝试访问百度网盘官方接口，不需要网站、Termux 或独立服务器。\n\n这是独立实验实现，不是 LinkSwift 官方 APP。仅自动跟随百度网盘站内 HTTPS 跳转，遇到登录或验证会停止；浏览器登录不会自动共享给本工具。获取到地址也不意味着可用或不限速。请不要在任何第三方页面提交账号密码。",13,GREY,false),params(10));
+        help.addView(text("本工具仅通过手机直接尝试访问百度网盘官方接口，不需要网站、Termux 或独立服务器。\n\n这是独立实验实现，不是 LinkSwift 官方 APP。可在本 APP 内打开百度官方登录页，使用当前应用会话重新请求。不会读取其他浏览器或百度 APP 的登录凭证。获取到地址也不意味着可用或不限速。请不要在任何第三方页面提交账号密码。",13,GREY,false),params(10));
         Button github=button("查看 LinkSwift 官方源码",false);
         help.addView(github,params(12));
         github.setOnClickListener(v->openUrl("https://github.com/hmjz100/LinkSwift"));
@@ -202,6 +205,14 @@ public final class MainActivity extends Activity {
                 });
             }
         },"pan-direct").start();
+    }
+    private void openOfficialLogin(){
+        String url="https://pan.baidu.com/";
+        try{url=BaiduShare.parse(shareInput.getText().toString(),codeInput.getText().toString()).official;}
+        catch(Exception ignored){}
+        Intent i=new Intent(this,BaiduLoginActivity.class);
+        i.putExtra("official_url",url);
+        startActivity(i);
     }
     private void openOfficial(){
         try{BaiduShare.Link l=BaiduShare.parse(shareInput.getText().toString(),codeInput.getText().toString());openUrl(l.official);}
