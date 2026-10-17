@@ -35,7 +35,7 @@ import java.util.UUID;
  */
 public final class LocalDriveActivity extends Activity {
     private static final int NAVY=0xff14264c;
-    private EditText appKey,tokenEntry,query,authCodeEntry,secretEntry;
+    private EditText appKey,tokenEntry,query,authCodeEntry,secretEntry,dlinkInput;
     private TextView stateText;
     private LinearLayout layout,files;
     private String token="",csrf="";
@@ -78,7 +78,7 @@ public final class LocalDriveActivity extends Activity {
         layout.setPadding(dp(18),dp(18),dp(18),dp(32));
         layout.setBackgroundColor(0xfff3f6fa);
         sc.addView(layout);setContentView(sc);
-        layout.addView(label("PanLocal V1.0 · 本地 OAuth 授权实验",20),space(0));
+        layout.addView(label("PanLocal V1.1 · 本地网盘下载权限检测",20),space(0));
         layout.addView(label("已确认旧版免密网页授权在你手机的多个浏览器里不能正常显示。改用百度文档支持的 code + oob：先获取一次性授权码，再临时输入自己应用的 SecretKey 在本机兑换令牌。密钥不写入APK、日志或远程服务器，属于单用户实验用途。",13),space(10));
         layout.addView(label("第一步：输入你自己的 App Key（不是 SecretKey）",14),space(15));
         appKey=field("从百度开放平台复制 App Key",layout,false);
@@ -106,10 +106,19 @@ public final class LocalDriveActivity extends Activity {
         search.setOnClickListener(v->search());
         files=new LinearLayout(this);files.setOrientation(LinearLayout.VERTICAL);
         layout.addView(files,space(10));
+        layout.addView(label("第四步：在本机验证大文件直链（仅1字节）",14),space(19));
+        layout.addView(label("普通浏览器可能因 User-Agent 不符而报31326；这里用百度要求的请求头检测。可粘贴之前的有效 dlink，不必重新授权。",13),space(8));
+        dlinkInput=field("粘贴临时 dlink，仅本地检查，不记录",layout,true);
+        Button validate=button("4. 测试下载地址的首字节",layout);
+        validate.setOnClickListener(v->{
+            String candidate=dlinkInput.getText().toString().trim();
+            dlinkInput.setText("");
+            checkDlink(candidate);
+        });
         Button clear=button("清除本机临时授权",layout);
         clear.setOnClickListener(v->{
             token="";verified=false;csrf="";
-            tokenEntry.setText("");files.removeAllViews();
+            tokenEntry.setText("");if(dlinkInput!=null)dlinkInput.setText("");files.removeAllViews();
             stateText.setText("已清除本机临时令牌；没有将其保存到文件。");
             DiagnosticLog.event("LOCALDRIVE","用户清除临时令牌");
         });
@@ -317,6 +326,8 @@ public final class LocalDriveActivity extends Activity {
             }
             runOnUiThread(()->{
                 stateText.setText("文件 API 返回 dlink，尚未验证实际下载是否成功。");
+                Button validate=button("应用内验证直链首字节（推荐）",files);
+                validate.setOnClickListener(v->checkDlink(link));
                 Button copy=button("复制下载地址（敏感，勿公开分享）",files);
                 copy.setOnClickListener(v->{
                     ClipboardManager clip=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
@@ -326,10 +337,97 @@ public final class LocalDriveActivity extends Activity {
             });
         });
     }
+    // Only Baidu's official PCS download hosts; do not follow arbitrary redirects.
+    private static boolean trustedDownloadHost(URL url){
+        if(!"https".equalsIgnoreCase(url.getProtocol())||url.getUserInfo()!=null||
+            (url.getPort()!=-1&&url.getPort()!=443))return false;
+        String h=url.getHost().toLowerCase(Locale.ROOT);
+        return h.equals("d.pcs.baidu.com")||h.endsWith(".pcs.baidu.com")||
+            h.equals("baidupcs.com")||h.endsWith(".baidupcs.com");
+    }
+    private static String[] serverError(InputStream in){
+        String[] result={"-999","-999"};
+        if(in==null)return result;
+        try(InputStream input=in){
+            ByteArrayOutputStream out=new ByteArrayOutputStream();
+            byte[] b=new byte[1024];int n;
+            while((n=input.read(b))!=-1){
+                if(out.size()+n>4096)break;
+                out.write(b,0,n);
+            }
+            JSONObject error=new JSONObject(out.toString("UTF-8"));
+            result[0]=String.valueOf(error.optInt("error_code",-999));
+            java.util.regex.Matcher hit=java.util.regex.Pattern.compile("hitcode:(\\d+)").matcher(error.optString("error_msg",""));
+            if(hit.find())result[1]=hit.group(1);
+        }catch(Exception ignored){}
+        return result;
+    }
+    private void checkDlink(String raw){
+        final URL start;
+        try{
+            if(raw==null||raw.length()<35||raw.length()>12000)throw new Exception("invalid");
+            start=new URL(raw);
+            if(!trustedDownloadHost(start))throw new Exception("host");
+        }catch(Exception e){message("只接受百度 PCS 官方 HTTPS dlink，不接受其他网址。");return;}
+        work("直链权限检查",()->{
+            URL url=start;
+            for(int hop=0;hop<5;hop++){
+                if(!trustedDownloadHost(url)){
+                    DiagnosticLog.event("DLCHECK","untrustedRedirect=true");
+                    message("已阻止向不受信任的站点跳转。");return;
+                }
+                HttpURLConnection c=(HttpURLConnection)url.openConnection();
+                c.setInstanceFollowRedirects(false);
+                c.setConnectTimeout(12000);c.setReadTimeout(15000);
+                c.setRequestMethod("GET");
+                c.setRequestProperty("User-Agent","pan.baidu.com");
+                c.setRequestProperty("Range","bytes=0-0");
+                c.setRequestProperty("Accept","*/*");
+                try{
+                    int status=c.getResponseCode();
+                    String ct=c.getContentType();
+                    String type=ct==null?"unknown":ct.split(";",2)[0].toLowerCase(Locale.ROOT).trim();
+                    DiagnosticLog.event("DLCHECK","hop="+hop+" http="+status+
+                        " contentType="+(type.matches("[a-z0-9+.-]+/[a-z0-9+.-]+")?type:"unknown")+
+                        " userAgentSet=true range0to0=true");
+                    if(status==301||status==302||status==303||status==307||status==308){
+                        String location=c.getHeaderField("Location");
+                        if(location==null){message("下载服务器返回跳转，但缺少目标地址。");return;}
+                        URL dest=new URL(url,location);
+                        if(!trustedDownloadHost(dest)){
+                            DiagnosticLog.event("DLCHECK","blockedRedirect=true");
+                            message("目标跳转不在百度已允许的 PCS 下载域名内，已停止。");return;
+                        }
+                        url=dest;continue;
+                    }
+                    if(status==200||status==206){
+                        if(type.contains("json")||type.contains("html")||type.startsWith("text/")){
+                            String[] err=serverError(c.getInputStream());
+                            DiagnosticLog.event("DLCHECK","textReply=true errorCode="+err[0]+" hitcode="+err[1]);
+                            message("收到错误文本而非文件：HTTP "+status+", error_code="+err[0]+", hitcode="+err[1]);return;
+                        }
+                        boolean byteOk;
+                        try(InputStream in=c.getInputStream()){byteOk=in.read()!=-1;}
+                        DiagnosticLog.event("DLCHECK","fileByte="+byteOk+" http="+status);
+                        message(byteOk?
+                            "成功收到文件首字节！HTTP "+status+"。下载权限初步通过；整文件下载、断点续传和速度尚未验证。":
+                            "HTTP "+status+"，但没有读到文件数据。");
+                        return;
+                    }
+                    String[] err=serverError(c.getErrorStream());
+                    DiagnosticLog.event("DLCHECK","rejected http="+status+" errorCode="+err[0]+" hitcode="+err[1]);
+                    message("百度拒绝读取文件：HTTP "+status+", error_code="+err[0]+", hitcode="+err[1]+"。");
+                    return;
+                }finally{c.disconnect();}
+            }
+            message("下载地址重定向次数过多，已停止。");
+        });
+    }
     @Override protected void onDestroy(){
         token="";verified=false;
         if(secretEntry!=null)secretEntry.setText("");
         if(authCodeEntry!=null)authCodeEntry.setText("");
+        if(dlinkInput!=null)dlinkInput.setText("");
         super.onDestroy();
     }
 }
