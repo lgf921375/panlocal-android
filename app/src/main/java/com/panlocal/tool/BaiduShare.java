@@ -84,6 +84,8 @@ public final class BaiduShare {
     private final Map<String,String> cookies=new LinkedHashMap<>();
     private final Map<String,Entry> listed=new LinkedHashMap<>();
     private String surl="",shareId="",uk="",sign="",timestamp="",sekey="",official="";
+    private boolean sharePageRedirected=false;
+    public boolean wasSharePageRedirected(){return sharePageRedirected;}
 
     public static Link parse(String raw,String manual) throws Exception {
         if(raw==null)raw="";
@@ -216,11 +218,21 @@ public final class BaiduShare {
         Link link=parse(raw,manual);
         surl=link.surl;official=link.official;
         listed.clear();shareId="";uk="";sign="";timestamp="";sekey="";
+        sharePageRedirected=false;
         loadOfficialSession();
         String clean="https://pan.baidu.com/s/1"+surl;
-        String page;
+        String page="";
         try {page=request(clean,null,"https://pan.baidu.com/");}
-        catch(Exception ex){throw new Exception("分享页访问失败："+ex.getMessage());}
+        catch(Exception ex){
+            String reason=ex.getMessage();
+            // Share-page HTML is optional for the public verify/list endpoints.
+            // Keep authentication/redirect diagnostics, but do not stop before trying those endpoints.
+            if(reason!=null&&reason.contains("百度网盘要求登录（HTTP")){
+                sharePageRedirected=true;
+            }else{
+                throw new Exception("分享页访问失败："+reason);
+            }
+        }
         if(!link.pwd.isEmpty()){
             String verifyUrl="https://pan.baidu.com/share/verify?"+query("surl",surl,"t",String.valueOf(System.currentTimeMillis()),"channel","chunlei","web","1","app_id","250528","clienttype","0");
             JSONObject resp;
@@ -244,6 +256,15 @@ public final class BaiduShare {
         if(response.optInt("errno",-999)!=0)throw new Exception("文件列表读取失败："+failure(response.optInt("errno",-999)));
         shareId=response.optString("shareid",response.optString("share_id",shareId));
         uk=response.optString("uk",uk);
+        // Some share/list versions only include share metadata in the file entries.
+        JSONArray fromResponse=response.optJSONArray("list");
+        if(fromResponse!=null&&fromResponse.length()>0){
+            JSONObject first=fromResponse.optJSONObject(0);
+            if(first!=null){
+                if(shareId.isEmpty())shareId=first.optString("shareid",first.optString("share_id",""));
+                if(uk.isEmpty())uk=first.optString("uk","");
+            }
+        }
         List<Entry> out=new ArrayList<>();
         JSONArray files=response.optJSONArray("list");
         if(files!=null)for(int i=0;i<Math.min(files.length(),100);i++){

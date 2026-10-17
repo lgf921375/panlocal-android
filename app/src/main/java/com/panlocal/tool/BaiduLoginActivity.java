@@ -44,7 +44,7 @@ public final class BaiduLoginActivity extends Activity {
         buttons.setOrientation(LinearLayout.HORIZONTAL);
         outer.addView(buttons,new LinearLayout.LayoutParams(-1,-2));
         Button home=button("返回分享页",buttons);
-        Button complete=button("同步登录并返回",buttons);
+        Button complete=button("同步当前会话并返回",buttons);
         web=new WebView(this);
         outer.addView(web,new LinearLayout.LayoutParams(-1,0,1));
         setContentView(outer);
@@ -77,7 +77,7 @@ public final class BaiduLoginActivity extends Activity {
         Uri uri;
         try{uri=Uri.parse(page);}catch(Exception ex){uri=null;}
         if(uri==null||!"pan.baidu.com".equalsIgnoreCase(uri.getHost())){
-            Toast.makeText(this,"请先登录并返回百度网盘分享页，再点击同步",Toast.LENGTH_LONG).show();
+            Toast.makeText(this,"请先返回百度网盘分享页，再点击同步会话",Toast.LENGTH_LONG).show();
             return;
         }
         String cookie=CookieManager.getInstance().getCookie("https://pan.baidu.com");
@@ -92,7 +92,7 @@ public final class BaiduLoginActivity extends Activity {
                 bt=data.optString("bdstoken","");jt=data.optString("jsToken","");
             }catch(Exception ignored){}
             BaiduShare.rememberOfficialSession(cookies,bt,jt);
-            Toast.makeText(this,"已同步本 APP 的百度官方页面会话，请返回后重新解析",Toast.LENGTH_LONG).show();
+            Toast.makeText(this,"页面会话已读取，但不代表已验证账号登录；请返回重新解析",Toast.LENGTH_LONG).show();
             finish();
         });
     }

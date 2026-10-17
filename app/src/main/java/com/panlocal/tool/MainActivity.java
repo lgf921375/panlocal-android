@@ -84,7 +84,7 @@ public final class MainActivity extends Activity {
         LinearLayout hero=column();
         hero.setPadding(dp(20),dp(25),dp(20),dp(24));
         hero.setBackgroundColor(NAVY);outer.addView(hero);
-        hero.addView(text("PANLOCAL · 安卓本地版 V0.4",12,0xffa5c4fc,true),params(0));
+        hero.addView(text("PANLOCAL · 安卓本地版 V0.5",12,0xffa5c4fc,true),params(0));
         hero.addView(text("百度网盘直链助手",25,Color.WHITE,true),params(10));
         hero.addView(text("粘贴分享链接 → 尝试读取文件 → 请求下载地址",13,0xffd0dcf0,false),params(10));
 
@@ -122,7 +122,7 @@ public final class MainActivity extends Activity {
         LinearLayout help=column();help.setPadding(dp(16),dp(16),dp(16),dp(18));
         help.setBackground(background(Color.WHITE,14));content.addView(help,params(16));
         help.addView(text("说明",16,NAVY,true),params(0));
-        help.addView(text("本工具仅通过手机直接尝试访问百度网盘官方接口，不需要网站、Termux 或独立服务器。\n\n这是独立实验实现，不是 LinkSwift 官方 APP。可在本 APP 内打开百度官方登录页，使用当前应用会话重新请求。不会读取其他浏览器或百度 APP 的登录凭证。获取到地址也不意味着可用或不限速。请不要在任何第三方页面提交账号密码。",13,GREY,false),params(10));
+        help.addView(text("本工具仅通过手机直接尝试访问百度网盘官方接口，不需要网站、Termux 或独立服务器。\n\n这是独立实验实现，不是 LinkSwift 官方 APP。分享页跳转登录时仍会尝试公开分享列表接口。APP 可读取其内置百度官方页面的会话，但这并不证明账号已经登录成功。不会读取其他浏览器或百度 APP 的登录凭证。获取到地址也不意味着可用或不限速。请不要在任何第三方页面提交账号密码。",13,GREY,false),params(10));
         Button github=button("查看 LinkSwift 官方源码",false);
         help.addView(github,params(12));
         github.setOnClickListener(v->openUrl("https://github.com/hmjz100/LinkSwift"));
@@ -166,7 +166,7 @@ public final class MainActivity extends Activity {
     }
     private void showEntries(List<BaiduShare.Entry> entries){
         if(entries.isEmpty()){note("接口已响应，但没有返回可展示的文件。",GREY);return;}
-        note("文件列表读取成功（"+entries.size()+" 项）。下载直链尚未验证。",GREEN);
+        note("文件列表读取成功（"+entries.size()+" 项）。"+(active!=null&&active.wasSharePageRedirected()?"首次分享页发生登录跳转，但公开列表接口成功。":"")+" 下载直链尚未验证。",GREEN);
         for(BaiduShare.Entry e:entries){
             LinearLayout item=column();
             item.setPadding(dp(12),dp(12),dp(12),dp(12));
