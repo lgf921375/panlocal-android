@@ -52,11 +52,12 @@ public final class MyDriveActivity extends Activity {
     }
     private void show(String text){runOnUiThread(()->status.setText(text));}
     private void inform(String msg){runOnUiThread(()->Toast.makeText(this,msg,Toast.LENGTH_LONG).show());}
-    private void run(String action,Runnable task){
+    private interface BackgroundJob { void execute() throws Exception; }
+    private void run(String action,BackgroundJob task){
         if(waiting)return;
         waiting=true;
         new Thread(()->{
-            try{task.run();}
+            try{task.execute();}
             catch(Exception e){
                 DiagnosticLog.event("DRIVE",action+" fail="+e.getClass().getSimpleName());
                 show(action+"失败："+(e instanceof java.io.IOException?"服务器或网络不可达，请先部署并检查OAuth服务":e.getMessage()));
