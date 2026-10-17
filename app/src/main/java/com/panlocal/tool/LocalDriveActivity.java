@@ -80,7 +80,7 @@ public final class LocalDriveActivity extends Activity {
         layout.setPadding(dp(18),dp(18),dp(18),dp(30));
         layout.setBackgroundColor(0xfff3f6fa);
         sc.addView(layout);setContentView(sc);
-        layout.addView(label("PanLocal V1.3 · 我的网盘",22),space(0));
+        layout.addView(label("PanLocal V1.4 · 我的网盘",22),space(0));
         layout.addView(label("首次保存开发者密钥并授权一次。以后自动恢复账号、搜索文件，无需每次输入密钥或授权码（仅当百度授权失效时需要重新授权）。",13),space(8));
         stateText=label("正在检查本机已保存的授权…",13);
         layout.addView(stateText,space(12));
@@ -156,7 +156,7 @@ public final class LocalDriveActivity extends Activity {
         Button oldToken=button("验证旧版 Token",advancedArea);
         oldToken.setOnClickListener(v->verify());
 
-        layout.addView(label("本机安全存储：SecretKey 和 OAuth 令牌经 Android Keystore 加密。不上传到 GitHub、聊天或自有服务器；不保留下载地址。",12),space(15));
+        layout.addView(label("下载检测会自动附带 OAuth 令牌和 User-Agent。原始 dlink 在普通浏览器可能无法直接下载；令牌不会出现在复制链接和日志中。",12),space(15));
         if(!LocalCredentialVault.hasSavedSecret(this)){
             stateText.setText("首次使用：填入 SecretKey 点“保存”，再授权一次。App Key 已预填，可核对是否正确。");
         }else{
@@ -494,7 +494,7 @@ public final class LocalDriveActivity extends Activity {
                     TextView info=label(filename+"\n路径："+path+"\n大小："+String.format(Locale.US,"%.2f MiB",size/1048576d),13);
                     files.addView(info,space(13));
                     if(isdir==0&&id.matches("[0-9]{1,22}")){
-                        Button get=button("请求此文件的 dlink",files);
+                        Button get=button("检查此文件能否下载",files);
                         get.setOnClickListener(v->requestDlink(id));
                     }
                 }
@@ -514,15 +514,18 @@ public final class LocalDriveActivity extends Activity {
                 message("未能取得 HTTPS 下载地址：errno="+errno+"。可以保存 TXT 诊断日志。");return;
             }
             runOnUiThread(()->{
-                stateText.setText("文件 API 返回 dlink，尚未验证实际下载是否成功。");
+                stateText.setText("已取得 dlink，正在用 OAuth 令牌和百度指定请求头检测下载权限…");
                 Button validate=button("应用内验证直链首字节（推荐）",files);
                 validate.setOnClickListener(v->checkDlink(link));
-                Button copy=button("复制下载地址（敏感，勿公开分享）",files);
+                Button copy=button("复制原始 dlink（浏览器可能不能直接下载）",files);
                 copy.setOnClickListener(v->{
                     ClipboardManager clip=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
                     if(clip!=null)clip.setPrimaryClip(ClipData.newPlainText("个人网盘临时地址",link));
                     Toast.makeText(this,"已复制，链接可能很快过期",Toast.LENGTH_SHORT).show();
                 });
+                // One button: request fresh dlink, then automatically probe with OAuth.
+                new android.os.Handler(android.os.Looper.getMainLooper())
+                    .postDelayed(()->checkDlink(link),150L);
             });
         });
     }
@@ -558,8 +561,23 @@ public final class LocalDriveActivity extends Activity {
             start=new URL(raw);
             if(!trustedDownloadHost(start))throw new Exception("host");
         }catch(Exception e){message("只接受百度 PCS 官方 HTTPS dlink，不接受其他网址。");return;}
+        if(!verified||token.isEmpty()){
+            message("请先完成本人网盘授权，获取有效的 OAuth 令牌，再在 APP 内进行下载检测。");
+            return;
+        }
+        if(start.getRef()!=null || (start.getQuery()!=null &&
+            java.util.regex.Pattern.compile("(^|&)access_token=",java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(start.getQuery()).find())){
+            message("粘贴的链接包含额外授权参数或片段，请从网盘文件列表重新取得原始 dlink。");
+            return;
+        }
+        final String access=token;
         work("直链权限检查",()->{
-            URL url=start;
+            // Baidu requires both OAuth access_token and its specified User-Agent.
+            // The augmented URL is kept only in memory, never shown or logged.
+            String base=start.toExternalForm();
+            URL url=new URL(base+(start.getQuery()==null?"?":"&")+"access_token="+encode(access));
+            DiagnosticLog.event("DLCHECK","oauthTokenAttached=true");
             for(int hop=0;hop<5;hop++){
                 if(!trustedDownloadHost(url)){
                     DiagnosticLog.event("DLCHECK","untrustedRedirect=true");
@@ -578,7 +596,7 @@ public final class LocalDriveActivity extends Activity {
                     String type=ct==null?"unknown":ct.split(";",2)[0].toLowerCase(Locale.ROOT).trim();
                     DiagnosticLog.event("DLCHECK","hop="+hop+" http="+status+
                         " contentType="+(type.matches("[a-z0-9+.-]+/[a-z0-9+.-]+")?type:"unknown")+
-                        " userAgentSet=true range0to0=true");
+                        " userAgentSet=true range0to0=true oauthTokenAttached=true");
                     if(status==301||status==302||status==303||status==307||status==308){
                         String location=c.getHeaderField("Location");
                         if(location==null){message("下载服务器返回跳转，但缺少目标地址。");return;}
