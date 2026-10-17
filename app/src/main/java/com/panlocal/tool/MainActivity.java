@@ -92,14 +92,29 @@ public final class MainActivity extends Activity {
         LinearLayout hero=column();
         hero.setPadding(dp(20),dp(25),dp(20),dp(24));
         hero.setBackgroundColor(NAVY);outer.addView(hero);
-        hero.addView(text("PANLOCAL · 安卓本地版 V1.2",12,0xffa5c4fc,true),params(0));
+        hero.addView(text("PANLOCAL · 安卓本地版 V1.3",12,0xffa5c4fc,true),params(0));
         hero.addView(text("百度网盘直链助手",25,Color.WHITE,true),params(10));
-        hero.addView(text("粘贴分享链接 → 尝试读取文件 → 请求下载地址",13,0xffd0dcf0,false),params(10));
+        hero.addView(text("个人网盘快速搜索 · 自动恢复授权",13,0xffd0dcf0,false),params(10));
 
         LinearLayout content=column();
         content.setPadding(dp(15),dp(16),dp(15),dp(24));outer.addView(content);
+        LinearLayout fastCard=column();
+        fastCard.setBackground(background(Color.WHITE,14));
+        fastCard.setPadding(dp(16),dp(18),dp(16),dp(16));
+        content.addView(fastCard,params(0));
+        fastCard.addView(text("我的网盘",22,NAVY,true),params(0));
+        fastCard.addView(text("首次授权后，后续自动登录并搜索原始文件。",13,GREY,false),params(7));
+        Button enter=button("打开我的网盘",true);
+        fastCard.addView(enter,params(14));
+        enter.setOnClickListener(v->startActivity(new Intent(this,LocalDriveActivity.class)));
+        Button other=button("更多功能 ▼",false);
+        fastCard.addView(other,params(9));
+        Button directLogs=button("保存诊断 TXT",false);
+        fastCard.addView(directLogs,params(8));
+        directLogs.setOnClickListener(v->saveTxt());
         LinearLayout form=column();form.setBackground(background(Color.WHITE,14));form.setPadding(dp(16),dp(16),dp(16),dp(18));
-        content.addView(form,params(0));
+        content.addView(form,params(14));
+        form.setVisibility(View.GONE);
         form.addView(text("01  分享信息",18,NAVY,true),params(0));
         form.addView(text("百度网盘分享链接或整段分享文案",13,GREY,false),params(14));
         shareInput=edit("https://pan.baidu.com/s/...",true);form.addView(shareInput,params(7));
@@ -123,6 +138,7 @@ public final class MainActivity extends Activity {
         myDrive.setBackground(background(Color.WHITE,14));
         myDrive.setPadding(dp(16),dp(16),dp(16),dp(18));
         content.addView(myDrive,params(14));
+        myDrive.setVisibility(View.GONE);
         myDrive.addView(text("02  我的网盘（OAuth 测试入口）",18,NAVY,true),params(0));
         myDrive.addView(text("视频已在自己的网盘，无需转存。可使用 V1.0 的本地 code 授权实验，不依赖服务器；另保留 V0.8 服务器 OAuth Bridge 入口。任何方式获得的 dlink 均需实际验证。",13,GREY,false),params(9));
         Button own=button("进入我的网盘 · 授权与搜索",true);
@@ -136,6 +152,7 @@ public final class MainActivity extends Activity {
         resultCard.setBackground(background(Color.WHITE,14));
         resultCard.setPadding(dp(16),dp(16),dp(16),dp(18));
         content.addView(resultCard,params(16));
+        resultCard.setVisibility(View.GONE);
         resultCard.addView(text("03  分享解析结果",18,NAVY,true),params(0));
         status=text("等待分享链接。",14,GREY,false);resultCard.addView(status,params(12));
         results=column();resultCard.addView(results,params(10));
@@ -145,6 +162,7 @@ public final class MainActivity extends Activity {
         traceCard.setBackground(background(Color.WHITE,14));
         traceCard.setPadding(dp(16),dp(16),dp(16),dp(18));
         content.addView(traceCard,params(16));
+        traceCard.setVisibility(View.GONE);
         traceCard.addView(text("04  本地诊断日志",18,NAVY,true),params(0));
         traceCard.addView(text("开启后自动在APP私有目录保留完整日志，重启APP仍可恢复。点击保存TXT可选择手机文件夹，不需要存储权限。最多约2MB，重新开始会清空旧记录。不会记录密码、令牌和完整链接。",12,GREY,false),params(8));
         Button traceStart=button("开始诊断（清空旧记录）",true);
@@ -183,15 +201,25 @@ public final class MainActivity extends Activity {
 
         LinearLayout help=column();help.setPadding(dp(16),dp(16),dp(16),dp(18));
         help.setBackground(background(Color.WHITE,14));content.addView(help,params(16));
+        help.setVisibility(View.GONE);
         help.addView(text("说明",16,NAVY,true),params(0));
         help.addView(text("分享模式直接通过手机连接百度官方接口；新增“我的网盘”模式为了保护 SecretKey，需由你控制的新加坡服务器运行独立 OAuth Bridge（尚未部署）。不需要 Termux 或网页前端。\n\n这是独立实验实现，不是 LinkSwift 官方 APP。分享页跳转登录时仍会尝试公开分享列表接口。APP 可读取其内置百度官方页面的会话，但这并不证明账号已经登录成功。不会读取其他浏览器或百度 APP 的登录凭证。获取到地址也不意味着可用或不限速。请不要在任何第三方页面提交账号密码。",13,GREY,false),params(10));
         Button github=button("查看 LinkSwift 官方源码",false);
         help.addView(github,params(12));
         github.setOnClickListener(v->openUrl("https://github.com/hmjz100/LinkSwift"));
+        other.setOnClickListener(v->{
+            boolean expanded=form.getVisibility()!=View.VISIBLE;
+            form.setVisibility(expanded?View.VISIBLE:View.GONE);
+            myDrive.setVisibility(expanded?View.VISIBLE:View.GONE);
+            resultCard.setVisibility(expanded?View.VISIBLE:View.GONE);
+            traceCard.setVisibility(expanded?View.VISIBLE:View.GONE);
+            help.setVisibility(expanded?View.VISIBLE:View.GONE);
+            other.setText(expanded?"收起高级功能 ▲":"更多功能 ▼");
+        });
         Intent incoming=getIntent();
         if(Intent.ACTION_SEND.equals(incoming.getAction())&&"text/plain".equals(incoming.getType())){
             String s=incoming.getStringExtra(Intent.EXTRA_TEXT);
-            if(s!=null)shareInput.setText(s);
+            if(s!=null){shareInput.setText(s);other.performClick();}
         }
     }
     @Override protected void onResume(){

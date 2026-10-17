@@ -35,7 +35,9 @@ import java.util.UUID;
  */
 public final class LocalDriveActivity extends Activity {
     private static final int NAVY=0xff14264c;
+    private static final String DEFAULT_APP_KEY="cFo2NH2NGbaYBI9m2GC95HW4rppJMbHv"; // OAuth public client identifier
     private EditText appKey,tokenEntry,query,authCodeEntry,secretEntry,dlinkInput;
+    private LinearLayout setupArea,authorizationArea,advancedArea;
     private TextView stateText;
     private LinearLayout layout,files;
     private String token="",csrf="";
@@ -75,62 +77,188 @@ public final class LocalDriveActivity extends Activity {
         getWindow().setNavigationBarColor(0xff152442);
         ScrollView sc=new ScrollView(this);
         layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(dp(18),dp(18),dp(18),dp(32));
+        layout.setPadding(dp(18),dp(18),dp(18),dp(30));
         layout.setBackgroundColor(0xfff3f6fa);
         sc.addView(layout);setContentView(sc);
-        layout.addView(label("PanLocal V1.2 · 本机加密保存开发者密钥",20),space(0));
-        layout.addView(label("适合自己使用：首次输入 App Key 与已轮换的 SecretKey，并使用 Android Keystore 加密保存在这部手机。以后授权只需要一次性 code，不必每次输入开发者密钥。密钥不会编译进 APK，也不会传给第三方服务器。",13),space(10));
-        layout.addView(label("第一步：输入你自己的 App Key（不是 SecretKey）",14),space(15));
-        appKey=field("从百度开放平台复制 App Key",layout,false);
-        String storedKey=LocalCredentialVault.savedAppKey(this);
-        if(!storedKey.isEmpty())appKey.setText(storedKey);
-        Button openCode=button("1. 打开百度官方授权页（获取 code）",layout);
-        openCode.setOnClickListener(v->openCodeAuthorization());
-        layout.addView(label("授权完成后，百度页面应显示一次性 code。只在本 APP 输入，不要发到聊天。首次使用请填写已轮换的 SecretKey 并点击“保存开发者密钥”；以后可将密钥框留空，APP 自动从本机加密存储读取。",13),space(13));
-        authCodeEntry=field("百度官方显示的 code（授权码）",layout,true);
-        secretEntry=field("SecretKey（首次填写，保存后可留空）",layout,true);
-        Button keep=button("在此手机加密保存 App Key + SecretKey",layout);
-        keep.setOnClickListener(v->saveOwnerCredentials());
-        Button delete=button("删除本机保存的开发者密钥",layout);
-        delete.setOnClickListener(v->clearOwnerCredentials());
-        Button exchange=button("2. 本机兑换令牌并验证账号",layout);
-        exchange.setOnClickListener(v->exchangeCode());
-        layout.addView(label("旧版隐式授权（仅保留作兼容性研究，不推荐）",14),space(20));
-        Button open=button("旧版：response_type=token 授权",layout);
-        open.setOnClickListener(v->openAuthorization());
-        layout.addView(label("旧方式如果确实返回 access_token，可以粘贴到下方验证；遇到空白页请停止重试。",13),space(13));
-        tokenEntry=field("粘贴官方 Access Token 或完整授权结果 URL",layout,true);
-        Button paste=button("从剪贴板粘贴旧方式的 token",layout);
-        paste.setOnClickListener(v->pasteResult());
-        Button verify=button("验证旧方式的 token",layout);
-        verify.setOnClickListener(v->verify());
-        stateText=label(LocalCredentialVault.hasSavedSecret(this)?
-            "状态：已在本机加密保存开发者密钥；仍需取得一次性 code 授权。":
-            "状态：尚未保存密钥；首次请在本机填写并点击保存。",14);
-        layout.addView(stateText,space(14));
-        layout.addView(label("第三步：任一方式授权成功后搜索本人网盘文件",14),space(18));
-        query=field("文件名关键词，例如 传奇",layout,false);
-        Button search=button("3. 搜索我的网盘文件",layout);
+        layout.addView(label("PanLocal V1.3 · 我的网盘",22),space(0));
+        layout.addView(label("首次保存开发者密钥并授权一次。以后自动恢复账号、搜索文件，无需每次输入密钥或授权码（仅当百度授权失效时需要重新授权）。",13),space(8));
+        stateText=label("正在检查本机已保存的授权…",13);
+        layout.addView(stateText,space(12));
+
+        setupArea=new LinearLayout(this);
+        setupArea.setOrientation(LinearLayout.VERTICAL);
+        layout.addView(setupArea,space(15));
+        setupArea.addView(label("首次设置（仅一次）",17),space(0));
+        appKey=field("百度开发者 App Key",setupArea,false);
+        String key=LocalCredentialVault.savedAppKey(this);
+        appKey.setText(key.isEmpty()?DEFAULT_APP_KEY:key);
+        secretEntry=field("新的 SecretKey（本机加密保存）",setupArea,true);
+        Button save=button("保存开发者密钥",setupArea);
+        save.setOnClickListener(v->saveOwnerCredentials());
+        if(LocalCredentialVault.hasSavedSecret(this))setupArea.setVisibility(android.view.View.GONE);
+        Button settings=button("修改 / 删除本机密钥",layout);
+        settings.setOnClickListener(v->{
+            setupArea.setVisibility(setupArea.getVisibility()==android.view.View.VISIBLE?
+                android.view.View.GONE:android.view.View.VISIBLE);
+        });
+
+        authorizationArea=new LinearLayout(this);
+        authorizationArea.setOrientation(LinearLayout.VERTICAL);
+        layout.addView(authorizationArea,space(15));
+        authorizationArea.addView(label("登录（仅首次或授权失效时）",17),space(0));
+        Button authorize=button("① 打开百度官方授权",authorizationArea);
+        authorize.setOnClickListener(v->openCodeAuthorization());
+        authCodeEntry=field("粘贴一次性授权码 code",authorizationArea,true);
+        Button paste=button("② 粘贴 code 并登录",authorizationArea);
+        paste.setOnClickListener(v->pasteCodeAndLogin());
+
+        layout.addView(label("搜索我的网盘文件",17),space(18));
+        query=field("输入视频名称关键词",layout,false);
+        query.setText("传奇");
+        Button search=button("搜索文件",layout);
         search.setOnClickListener(v->search());
         files=new LinearLayout(this);files.setOrientation(LinearLayout.VERTICAL);
-        layout.addView(files,space(10));
-        layout.addView(label("第四步：在本机验证大文件直链（仅1字节）",14),space(19));
-        layout.addView(label("普通浏览器可能因 User-Agent 不符而报31326；这里用百度要求的请求头检测。可粘贴之前的有效 dlink，不必重新授权。",13),space(8));
-        dlinkInput=field("粘贴临时 dlink，仅本地检查，不记录",layout,true);
-        Button validate=button("4. 测试下载地址的首字节",layout);
-        validate.setOnClickListener(v->{
-            String candidate=dlinkInput.getText().toString().trim();
-            dlinkInput.setText("");
-            checkDlink(candidate);
+        layout.addView(files,space(8));
+
+        Button options=button("高级功能 / 诊断 ▼",layout);
+        advancedArea=new LinearLayout(this);
+        advancedArea.setOrientation(LinearLayout.VERTICAL);
+        advancedArea.setVisibility(android.view.View.GONE);
+        layout.addView(advancedArea,space(10));
+        options.setOnClickListener(v->{
+            boolean show=advancedArea.getVisibility()!=android.view.View.VISIBLE;
+            advancedArea.setVisibility(show?android.view.View.VISIBLE:android.view.View.GONE);
+            options.setText(show?"收起高级功能 ▲":"高级功能 / 诊断 ▼");
         });
-        Button clear=button("清除本机临时授权",layout);
-        clear.setOnClickListener(v->{
-            token="";verified=false;csrf="";
-            tokenEntry.setText("");if(dlinkInput!=null)dlinkInput.setText("");files.removeAllViews();
-            stateText.setText("已清除本机临时令牌；没有将其保存到文件。");
-            DiagnosticLog.event("LOCALDRIVE","用户清除临时令牌");
+        advancedArea.addView(label("已有下载链接：只验证首字节，不下载整个文件",13),space(3));
+        dlinkInput=field("本机粘贴临时 dlink",advancedArea,true);
+        Button direct=button("检测这个下载地址",advancedArea);
+        direct.setOnClickListener(v->{
+            String value=dlinkInput.getText().toString().trim();dlinkInput.setText("");
+            checkDlink(value);
         });
-        layout.addView(label("隐私：App Key 和 SecretKey 仅在你选择保存后写入 APP 私有存储，其中 SecretKey 使用 Android Keystore AES-GCM 加密；code 与 Access Token 不会永久保存。不写 APK、GitHub 或 TXT 日志。换手机、卸载应用或清除数据会丢失本机密钥。请避免录屏或分享凭据。",12),space(17));
+        Button logout=button("退出网盘账号（清除已保存的授权）",advancedArea);
+        logout.setOnClickListener(v->{
+            token="";verified=false;
+            LocalCredentialVault.clearOAuth(this);
+            authorizationArea.setVisibility(android.view.View.VISIBLE);
+            files.removeAllViews();
+            stateText.setText("账号授权已清除，开发者密钥仍保存在本机。");
+            DiagnosticLog.event("LOCALDRIVE","savedOAuthCleared=true");
+        });
+        Button delete=button("删除这台手机保存的开发者密钥",advancedArea);
+        delete.setOnClickListener(v->clearOwnerCredentials());
+
+        // Historical implicit-grant controls kept here only for old compatibility testing.
+        Button oldAuthorize=button("旧版 OAuth 兼容测试（不推荐）",advancedArea);
+        oldAuthorize.setOnClickListener(v->openAuthorization());
+        tokenEntry=field("旧版授权返回的 Token",advancedArea,true);
+        Button oldToken=button("验证旧版 Token",advancedArea);
+        oldToken.setOnClickListener(v->verify());
+
+        layout.addView(label("本机安全存储：SecretKey 和 OAuth 令牌经 Android Keystore 加密。不上传到 GitHub、聊天或自有服务器；不保留下载地址。",12),space(15));
+        if(!LocalCredentialVault.hasSavedSecret(this)){
+            stateText.setText("首次使用：填入 SecretKey 点“保存”，再授权一次。App Key 已预填，可核对是否正确。");
+        }else{
+            stateText.setText("已加密保存开发者密钥；正在检查能否自动登录…");
+            restoreLogin();
+        }
+    }
+    private void pasteCodeAndLogin(){
+        if(authCodeEntry.getText().length()==0){
+            ClipboardManager cm=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
+            if(cm!=null&&cm.hasPrimaryClip()){
+                ClipData clip=cm.getPrimaryClip();
+                if(clip!=null&&clip.getItemCount()>0){
+                    CharSequence text=clip.getItemAt(0).coerceToText(this);
+                    if(text!=null)authCodeEntry.setText(text.toString().trim());
+                }
+            }
+        }
+        exchangeCode();
+    }
+    private JSONObject refreshOAuth(String app,String oldRefresh) throws Exception{
+        String secret=LocalCredentialVault.secretFor(this,app);
+        if(secret.isEmpty()||oldRefresh==null||oldRefresh.isEmpty())throw new Exception("missing_refresh_credentials");
+        URL address=new URL("https://openapi.baidu.com/oauth/2.0/token?grant_type=refresh_token"
+            +"&client_id="+encode(app)+"&client_secret="+encode(secret)
+            +"&refresh_token="+encode(oldRefresh));
+        HttpURLConnection c=(HttpURLConnection)address.openConnection();
+        c.setInstanceFollowRedirects(false);c.setConnectTimeout(12000);c.setReadTimeout(18000);
+        try{
+            int status=c.getResponseCode();
+            if(status!=200){
+                DiagnosticLog.event("LOCALDRIVE","refreshHttp="+status);
+                throw new Exception("refresh_http_"+status);
+            }
+            try(InputStream in=c.getInputStream();ByteArrayOutputStream data=new ByteArrayOutputStream()){
+                byte[] buf=new byte[4096];int n;
+                while((n=in.read(buf))!=-1){
+                    if(data.size()+n>32768)throw new Exception("refresh_too_big");
+                    data.write(buf,0,n);
+                }
+                JSONObject res=new JSONObject(data.toString("UTF-8"));
+                String access=res.optString("access_token","");
+                if(access.isEmpty())throw new Exception("refresh_rejected");
+                String renew=res.optString("refresh_token",oldRefresh);
+                long exp=System.currentTimeMillis()+Math.max(60L,res.optLong("expires_in",3600L)-180L)*1000L;
+                LocalCredentialVault.saveOAuth(this,app,access,renew,exp);
+                DiagnosticLog.event("LOCALDRIVE","refreshSucceeded=true");
+                return res;
+            }
+        }finally{c.disconnect();}
+    }
+    private void restoreLogin(){
+        final String app=appKey.getText().toString().trim();
+        work("自动恢复登录",()->{
+            JSONObject stored=LocalCredentialVault.loadOAuth(this,app);
+            if(stored==null||stored.optString("access","").isEmpty()){
+                message("开发者密钥已保存。首次请点击“打开百度官方授权”，完成一次授权。");
+                return;
+            }
+            String access=stored.optString("access","");
+            String refresh=stored.optString("refresh","");
+            long expiry=stored.optLong("expiry",0);
+            if(expiry<System.currentTimeMillis()+60000L){
+                if(refresh.isEmpty()){
+                    LocalCredentialVault.clearOAuth(this);
+                    message("授权已过期，需要再登录一次。开发者密钥无需重填。");
+                    return;
+                }
+                try{
+                    JSONObject renewed=refreshOAuth(app,refresh);
+                    access=renewed.optString("access_token","");
+                }catch(Exception e){
+                    DiagnosticLog.event("LOCALDRIVE","autoRefreshFailed="+e.getClass().getSimpleName());
+                    LocalCredentialVault.clearOAuth(this);
+                    message("自动续期失败，需要重新授权一次；开发者密钥仍保存在手机。");
+                    return;
+                }
+            }
+            token=access;
+            JSONObject account=api("uinfo");
+            int errno=account.optInt("errno",-999);
+            if(errno!=0&&!refresh.isEmpty()){
+                try{
+                    JSONObject renewed=refreshOAuth(app,refresh);
+                    token=renewed.optString("access_token","");
+                    account=api("uinfo");
+                    errno=account.optInt("errno",-999);
+                }catch(Exception e){
+                    DiagnosticLog.event("LOCALDRIVE","retryRefreshFailed="+e.getClass().getSimpleName());
+                }
+            }
+            verified=errno==0;
+            DiagnosticLog.event("LOCALDRIVE","restoreAuthorized="+verified+" errno="+errno);
+            if(verified){
+                runOnUiThread(()->authorizationArea.setVisibility(android.view.View.GONE));
+                message("已自动恢复百度网盘登录。可以直接搜索文件。");
+            }else{
+                token="";
+                LocalCredentialVault.clearOAuth(this);
+                message("旧授权不可用，请重新授权一次；开发者密钥无需重填。");
+            }
+        });
     }
     private void saveOwnerCredentials(){
         final String key=appKey.getText().toString().trim();
@@ -139,7 +267,9 @@ public final class LocalDriveActivity extends Activity {
         try{
             LocalCredentialVault.save(this,key,secret);
             DiagnosticLog.event("LOCALDRIVE","developerCredentialsSavedLocally=true (no values)");
-            stateText.setText("已将开发者密钥加密保存在本机，后续 SecretKey 输入框可留空；仍需获取一次性 code。");
+            setupArea.setVisibility(android.view.View.GONE);
+            authorizationArea.setVisibility(android.view.View.VISIBLE);
+            stateText.setText("开发者密钥已保存。首次请点击“打开百度官方授权”，后续会自动恢复登录。");
         }catch(Exception e){
             DiagnosticLog.event("LOCALDRIVE","developerCredentialsSaveFailed="+e.getClass().getSimpleName());
             stateText.setText("本机保存失败，请检查输入格式或设备密钥库。不会保存明文；错误类型："+e.getClass().getSimpleName());
@@ -148,10 +278,14 @@ public final class LocalDriveActivity extends Activity {
     private void clearOwnerCredentials(){
         try{
             LocalCredentialVault.clear(this);
-            appKey.setText("");
+            token="";verified=false;
+            appKey.setText(DEFAULT_APP_KEY);
             secretEntry.setText("");
+            setupArea.setVisibility(android.view.View.VISIBLE);
+            authorizationArea.setVisibility(android.view.View.VISIBLE);
             DiagnosticLog.event("LOCALDRIVE","developerCredentialsCleared=true");
-            stateText.setText("本机已保存的 App Key 和 SecretKey 已清除。当前临时 OAuth 令牌仍可用；需另外点击清除临时授权。");
+            files.removeAllViews();
+            stateText.setText("本机已清除所有已保存的开发者密钥和网盘授权。");
         }catch(Exception e){
             DiagnosticLog.event("LOCALDRIVE","developerCredentialsClearFailed="+e.getClass().getSimpleName());
             stateText.setText("本机密钥清除失败，请尝试清除 APP 数据；错误类型："+e.getClass().getSimpleName());
@@ -221,8 +355,20 @@ public final class LocalDriveActivity extends Activity {
                 int errno=account.optInt("errno",-999);
                 verified=errno==0;
                 DiagnosticLog.event("LOCALDRIVE","code-uinfo errno="+errno+" verified="+verified);
-                if(verified)message("本人网盘授权通过。现在可以搜索文件；退出此页面后令牌将清除。");
-                else{token="";message("已取得 Token，但个人网盘接口验证失败 errno="+errno+"；检查网盘 scope。");}
+                if(verified){
+                    if(LocalCredentialVault.hasSavedSecret(this)){
+                        try{
+                            String refresh=response.optString("refresh_token","");
+                            long expires=System.currentTimeMillis()+Math.max(60L,response.optLong("expires_in",3600L)-180L)*1000L;
+                            LocalCredentialVault.saveOAuth(this,key,received,refresh,expires);
+                            DiagnosticLog.event("LOCALDRIVE","oauthSessionSavedLocally=true refreshPresent="+!refresh.isEmpty());
+                        }catch(Exception e){
+                            DiagnosticLog.event("LOCALDRIVE","oauthSaveFailed="+e.getClass().getSimpleName());
+                        }
+                    }
+                    runOnUiThread(()->authorizationArea.setVisibility(android.view.View.GONE));
+                    message("登录成功。已在本机加密保存授权，重开 APP 将尝试自动恢复登录。现在可以搜索文件。");
+                }else{token="";message("已取得 Token，但个人网盘接口验证失败 errno="+errno+"；检查网盘 scope。");}
             }finally{con.disconnect();}
         });
     }

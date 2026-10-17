@@ -11,6 +11,7 @@ import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
+import org.json.JSONObject;
 
 /**
  * Device-local owner credentials. Never included in source/APK and never logged.
@@ -24,6 +25,8 @@ public final class LocalCredentialVault {
     private static final String KEY_APP="app_key";
     private static final String KEY_IV="iv";
     private static final String KEY_CIPHER="ciphertext";
+    private static final String KEY_OAUTH_IV="oauth_iv";
+    private static final String KEY_OAUTH_BLOB="oauth_blob";
     private LocalCredentialVault(){}
 
     private static SharedPreferences preferences(Context context){
@@ -56,6 +59,34 @@ public final class LocalCredentialVault {
             && !p.getString(KEY_IV,"").isEmpty()
             && !p.getString(KEY_CIPHER,"").isEmpty();
     }
+    /** Stored refresh/access tokens share Android Keystore encryption, never plaintext prefs. */
+    public static synchronized void saveOAuth(Context context,String appKey,String access,String refresh,long expiryMillis) throws Exception{
+        if(appKey==null||!appKey.equals(savedAppKey(context)))throw new Exception("app_key_mismatch");
+        if(access==null||access.isEmpty())throw new Exception("empty_token");
+        JSONObject blob=new JSONObject();
+        blob.put("access",access).put("refresh",refresh==null?"":refresh).put("expiry",expiryMillis);
+        Cipher aes=Cipher.getInstance("AES/GCM/NoPadding");
+        aes.init(Cipher.ENCRYPT_MODE,getKey());
+        aes.updateAAD(("oauth:"+appKey).getBytes(StandardCharsets.UTF_8));
+        byte[] encrypted=aes.doFinal(blob.toString().getBytes(StandardCharsets.UTF_8));
+        if(!preferences(context).edit()
+            .putString(KEY_OAUTH_IV,Base64.encodeToString(aes.getIV(),Base64.NO_WRAP))
+            .putString(KEY_OAUTH_BLOB,Base64.encodeToString(encrypted,Base64.NO_WRAP)).commit())
+            throw new Exception("token_storage_failed");
+    }
+    public static synchronized JSONObject loadOAuth(Context context,String appKey) throws Exception{
+        SharedPreferences p=preferences(context);
+        if(appKey==null||!appKey.equals(savedAppKey(context)))return null;
+        String iv=p.getString(KEY_OAUTH_IV,""),blob=p.getString(KEY_OAUTH_BLOB,"");
+        if(iv.isEmpty()||blob.isEmpty())return null;
+        Cipher aes=Cipher.getInstance("AES/GCM/NoPadding");
+        aes.init(Cipher.DECRYPT_MODE,getKey(),new GCMParameterSpec(128,Base64.decode(iv,Base64.NO_WRAP)));
+        aes.updateAAD(("oauth:"+appKey).getBytes(StandardCharsets.UTF_8));
+        return new JSONObject(new String(aes.doFinal(Base64.decode(blob,Base64.NO_WRAP)),StandardCharsets.UTF_8));
+    }
+    public static synchronized void clearOAuth(Context context){
+        preferences(context).edit().remove(KEY_OAUTH_IV).remove(KEY_OAUTH_BLOB).commit();
+    }
     public static synchronized void save(Context context,String appKey,String secret) throws Exception {
         if(appKey==null||!appKey.matches("[A-Za-z0-9_-]{8,128}"))
             throw new IllegalArgumentException("invalid_app_key");
@@ -67,6 +98,7 @@ public final class LocalCredentialVault {
         byte[] encrypted=cipher.doFinal(secret.getBytes(StandardCharsets.UTF_8));
         String iv=Base64.encodeToString(cipher.getIV(),Base64.NO_WRAP);
         String ciphertext=Base64.encodeToString(encrypted,Base64.NO_WRAP);
+        if(!appKey.equals(savedAppKey(context)))clearOAuth(context);
         if(!preferences(context).edit().putString(KEY_APP,appKey)
             .putString(KEY_IV,iv).putString(KEY_CIPHER,ciphertext).commit()){
             throw new IllegalStateException("local_storage_failed");
