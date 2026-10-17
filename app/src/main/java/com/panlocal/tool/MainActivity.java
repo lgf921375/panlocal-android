@@ -10,6 +10,10 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -33,6 +37,8 @@ public final class MainActivity extends Activity {
     private Button readButton;
     private BaiduShare active;
     private boolean busy;
+    private static final int SAVE_TXT_CODE=7711;
+    private String pendingText;
     private int dp(float v){return (int)(getResources().getDisplayMetrics().density*v+0.5f);}
     private LinearLayout column(){
         LinearLayout l=new LinearLayout(this);
@@ -76,6 +82,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle bundle){
         super.onCreate(bundle);
+        DiagnosticLog.init(getApplicationContext());
         getWindow().setStatusBarColor(NAVY);
         getWindow().setNavigationBarColor(NAVY);
         ScrollView scroll=new ScrollView(this);
@@ -85,7 +92,7 @@ public final class MainActivity extends Activity {
         LinearLayout hero=column();
         hero.setPadding(dp(20),dp(25),dp(20),dp(24));
         hero.setBackgroundColor(NAVY);outer.addView(hero);
-        hero.addView(text("PANLOCAL · 安卓本地版 V0.6",12,0xffa5c4fc,true),params(0));
+        hero.addView(text("PANLOCAL · 安卓本地版 V0.7",12,0xffa5c4fc,true),params(0));
         hero.addView(text("百度网盘直链助手",25,Color.WHITE,true),params(10));
         hero.addView(text("粘贴分享链接 → 尝试读取文件 → 请求下载地址",13,0xffd0dcf0,false),params(10));
 
@@ -126,10 +133,13 @@ public final class MainActivity extends Activity {
         traceCard.setPadding(dp(16),dp(16),dp(16),dp(18));
         content.addView(traceCard,params(16));
         traceCard.addView(text("03  本地诊断日志",18,NAVY,true),params(0));
-        traceCard.addView(text("先开启诊断，再依次解析、在官方页面登录/同步、重试提取。只记录阶段、状态码、返回结构；不会记录账号密码、Cookie、令牌和完整链接。请自行选择是否分享。",12,GREY,false),params(8));
+        traceCard.addView(text("开启后自动在APP私有目录保留完整日志，重启APP仍可恢复。点击保存TXT可选择手机文件夹，不需要存储权限。最多约2MB，重新开始会清空旧记录。不会记录密码、令牌和完整链接。",12,GREY,false),params(8));
         Button traceStart=button("开始诊断（清空旧记录）",true);
         traceCard.addView(traceStart,params(12));
-        traceStart.setOnClickListener(v->{DiagnosticLog.start();refreshDiagnostics();toast("已开始记录核心请求");});
+        traceStart.setOnClickListener(v->{DiagnosticLog.start();DiagnosticLog.setActive(this,true);refreshDiagnostics();toast("记录已开始，并自动保存在APP中");});
+        Button saveTxt=button("保存完整日志为TXT",true);
+        traceCard.addView(saveTxt,params(8));
+        saveTxt.setOnClickListener(v->saveTxt());
         LinearLayout traceActions=new LinearLayout(this);
         traceActions.setOrientation(LinearLayout.HORIZONTAL);
         traceCard.addView(traceActions,params(8));
@@ -177,6 +187,32 @@ public final class MainActivity extends Activity {
     }
     private void refreshDiagnostics(){
         if(diagnosticText!=null)diagnosticText.setText(DiagnosticLog.tail(55));
+    }
+    private void saveTxt(){
+        pendingText=DiagnosticLog.all();
+        String name="PanLocal-diagnostic-"+new SimpleDateFormat("yyyyMMdd-HHmmss",Locale.US).format(new Date())+".txt";
+        Intent target=new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        target.addCategory(Intent.CATEGORY_OPENABLE);
+        target.setType("text/plain");
+        target.putExtra(Intent.EXTRA_TITLE,name);
+        try{startActivityForResult(target,SAVE_TXT_CODE);}
+        catch(Exception e){pendingText=null;toast("无法打开安卓系统保存界面");}
+    }
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+        super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode!=SAVE_TXT_CODE)return;
+        String contents=pendingText;
+        pendingText=null;
+        if(resultCode!=RESULT_OK||data==null||data.getData()==null){
+            toast("已取消保存，APP内日志仍保留");
+            return;
+        }
+        try(OutputStream out=getContentResolver().openOutputStream(data.getData())){
+            if(out==null)throw new java.io.IOException("cannot open file");
+            out.write((contents==null?DiagnosticLog.all():contents).getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            toast("完整TXT已保存，请上传该文件");
+        }catch(Exception e){toast("保存失败，请重新选择文件位置");}
     }
     private void paste(){
         ClipboardManager clipboard=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);

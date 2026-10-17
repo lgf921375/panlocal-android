@@ -4,6 +4,12 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
 import java.util.Date;
 import java.util.Locale;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import android.content.Context;
 
 /**
  * Local, opt-in diagnostic trace. No network upload, no response bodies, no
@@ -14,12 +20,47 @@ public final class DiagnosticLog {
     private static final ArrayDeque<String> lines=new ArrayDeque<>();
     private static boolean recording=false;
     private static int seq=0;
+    private static File logFile;
+    private static final int MAX_FILE_BYTES=2*1024*1024;
+    public static synchronized void init(Context context){
+        if(logFile!=null)return;
+        logFile=new File(context.getApplicationContext().getFilesDir(),"panlocal-diagnostics.txt");
+        String content=readDisk();
+        for(String row:content.split("\n")){
+            if(row.matches("\\d{3,} .*")){
+                lines.addLast(row);
+                while(lines.size()>500)lines.removeFirst();
+                try{seq=Math.max(seq,Integer.parseInt(row.split(" ",2)[0]));}catch(Exception ignored){}
+            }
+        }
+        recording=context.getSharedPreferences("diagnostics",0).getBoolean("active",false);
+        if(recording)write("诊断","APP 进程重新启动，继续记录");
+    }
+    private static String readDisk(){
+        if(logFile==null||!logFile.isFile())return "";
+        try(FileInputStream in=new FileInputStream(logFile);ByteArrayOutputStream out=new ByteArrayOutputStream()){
+            byte[] buf=new byte[8192];int n;
+            while((n=in.read(buf))!=-1){if(out.size()+n>MAX_FILE_BYTES+1024)break;out.write(buf,0,n);}
+            return out.toString("UTF-8");
+        }catch(Exception ignored){return "";}
+    }
+    private static void persist(String line){
+        if(logFile==null)return;
+        byte[] bytes=(line+"\n").getBytes(StandardCharsets.UTF_8);
+        if(logFile.length()+bytes.length>MAX_FILE_BYTES){recording=false;return;}
+        try(FileOutputStream out=new FileOutputStream(logFile,true)){out.write(bytes);}
+        catch(Exception ignored){recording=false;}
+    }
+    public static synchronized void setActive(Context c,boolean active){
+        c.getApplicationContext().getSharedPreferences("diagnostics",0).edit().putBoolean("active",active).apply();
+    }
     private DiagnosticLog(){}
     public static synchronized void start(){
         recording=true;
         lines.clear();
         seq=0;
-        write("诊断","PanLocal V0.6 开始记录；日志仅在本机内存，主动分享才会发送");
+        if(logFile!=null)try(FileOutputStream out=new FileOutputStream(logFile,false)){}catch(Exception ignored){}
+        write("诊断","PanLocal V0.7 开始记录；本地自动保存日志，使用按钮另存TXT");
     }
     public static synchronized void stop(){
         write("诊断","用户停止记录");
@@ -35,13 +76,17 @@ public final class DiagnosticLog {
     }
     private static void write(String stage,String info){
         String time=new SimpleDateFormat("HH:mm:ss.SSS",Locale.US).format(new Date());
-        lines.addLast(String.format(Locale.US,"%03d %s [%s] %s",++seq,time,scrub(stage),scrub(info)));
-        while(lines.size()>320)lines.removeFirst();
+        String entry=String.format(Locale.US,"%04d %s [%s] %s",++seq,time,scrub(stage),scrub(info));
+        lines.addLast(entry);
+        while(lines.size()>500)lines.removeFirst();
+        persist(entry);
     }
     public static synchronized void event(String stage,String info){
         if(recording)write(stage,info);
     }
     public static synchronized String all(){
+        String saved=readDisk();
+        if(!saved.isEmpty())return "PanLocal 本地诊断记录 V0.7\n"+saved;
         StringBuilder b=new StringBuilder();
         b.append("PanLocal 本地诊断记录\n");
         b.append("隐私：不包含登录凭据、文件名、完整分享链接或下载地址。\n");
@@ -73,6 +118,13 @@ public final class DiagnosticLog {
         if(o instanceof org.json.JSONObject)return "object";
         if(o instanceof String)return "string";
         return "other";
+    }
+    public static String shapeOfString(Object value){
+        if(!(value instanceof String))return "n/a";
+        String raw=((String)value).trim();
+        String shape=raw.startsWith("[")?"array-like":raw.startsWith("{")?"object-like":
+            raw.startsWith("<")?"html-like":raw.startsWith("http")?"url-like":"other-text";
+        return "length="+raw.length()+" shape="+shape;
     }
     public static String webHost(android.net.Uri uri){
         if(uri==null)return "unknown";

@@ -34,6 +34,7 @@ public final class BaiduLoginActivity extends Activity {
     }
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
+        DiagnosticLog.init(getApplicationContext());
         String requested=getIntent().getStringExtra("official_url");
         Uri initial=null;
         try{initial=Uri.parse(requested);}catch(Exception ignored){}

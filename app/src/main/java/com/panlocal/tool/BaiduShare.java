@@ -318,7 +318,7 @@ public final class BaiduShare {
         String form=query("encrypt","0","product","share","uk",uk,"primaryid",shareId,"fid_list","["+id+"]");
         if(!sekey.isEmpty())form+="&"+query("extra",new JSONObject().put("sekey",sekey).toString());
         JSONObject result=json(url,form,official);
-        DiagnosticLog.event("DIRECT","sharedownload errno="+result.optInt("errno",-999)+" listType="+DiagnosticLog.listType(result.opt("list"))+" dataPresent="+(result.optJSONObject("data")!=null));
+        DiagnosticLog.event("DIRECT","sharedownload errno="+result.optInt("errno",-999)+" listType="+DiagnosticLog.listType(result.opt("list"))+" "+DiagnosticLog.shapeOfString(result.opt("list"))+" dataPresent="+(result.optJSONObject("data")!=null));
         if(result.optInt("errno",-999)!=0)throw new Exception("直链接口拒绝请求："+failure(result.optInt("errno",-999)));
         String direct=result.optString("dlink","");
         if(direct.isEmpty()){
