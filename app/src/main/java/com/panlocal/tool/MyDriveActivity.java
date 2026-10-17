@@ -103,9 +103,9 @@ public final class MyDriveActivity extends Activity {
         Button check=button("3. 返回后检查授权结果",root);
         check.setOnClickListener(v->run("授权检查",()->{
             JSONObject res=request("status",session());
-            String state=res.optString("status","unknown");
-            DiagnosticLog.event("DRIVE","status="+(state.equals("ready")?"ready":state.equals("pending")?"pending":"other"));
-            if(!state.equals("ready")){show("授权状态："+state+"。请完成官方网页的授权，或重新开始。");return;}
+            String phase=res.optString("status","unknown");
+            DiagnosticLog.event("DRIVE","status="+(phase.equals("ready")?"ready":phase.equals("pending")?"pending":"other"));
+            if(!phase.equals("ready")){show("授权状态："+phase+"。请完成官方网页的授权，或重新开始。");return;}
             JSONObject info=request("account",session());
             DiagnosticLog.event("DRIVE","account errno="+info.optInt("errno",-999)+" ok="+info.optBoolean("ok",false));
             show(info.optBoolean("ok",false)?"百度个人网盘授权已验证，可以搜索文件。":"令牌已取得，但个人网盘 API 无法验证；可能缺少权限。");
