@@ -17,7 +17,11 @@ final class OwnerTestingSeed {
         if(LocalCredentialVault.hasSavedSecret(context))return false;
         if(context.getSharedPreferences(PREF,0).getBoolean("disabled",false))return false;
         String raw=INJECT_SLOT;
-        if(raw.equals("QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"))return false;
+        boolean isPlaceholder=true;
+        for(int i=0;i<raw.length();i++){
+            if(raw.charAt(i)!='Q'){isPlaceholder=false;break;}
+        }
+        if(isPlaceholder)return false;
         LocalCredentialVault.save(context,appKey,raw);
         return true;
     }
