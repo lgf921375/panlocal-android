@@ -17,6 +17,28 @@ import zlib
 
 SLOT = b"Q" * 32
 DEX = "classes2.dex"
+SYMBOLS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+def compact_slot(credential: bytes) -> bytes:
+    """Encode 32 base62 characters into 30 base85 printable bytes plus Q/Z.
+    The leading Q preserves DEX string_id ordering between Probe and RANGE.
+    This is NOT encryption; a recipient can reverse this representation.
+    """
+    number = 0
+    for ch in credential.decode("ascii"):
+        if ch not in SYMBOLS:
+            raise ValueError("Private test SecretKey must use A-Z, a-z or 0-9")
+        number = number * 62 + SYMBOLS.index(ch)
+    values = bytearray(30)
+    for i in range(29, -1, -1):
+        number, digit = divmod(number, 85)
+        values[i] = 33 + digit
+    if number:
+        raise ValueError("Credential exceeds 30-digit base85 capacity")
+    encoded = b"Q" + bytes(values) + b"Z"
+    if len(encoded) != 32:
+        raise ValueError("Unexpected slot size")
+    return encoded
 
 def patch_dex(data: bytes, key: bytes) -> bytes:
     if not data.startswith(b"dex\n"):
@@ -25,7 +47,29 @@ def patch_dex(data: bytes, key: bytes) -> bytes:
         raise ValueError("Credential must be 32 printable ASCII characters")
     if data.count(SLOT) != 1:
         raise ValueError("Expected exactly one owner credential slot")
-    mutable = bytearray(data.replace(SLOT, key, 1))
+    encoded = compact_slot(key)
+    # DEX requires string_id entries to be sorted. The previous naive raw
+    # SecretKey substitution violated this ordering and prevented app startup.
+    id_count, id_table = struct.unpack_from("<II", data, 56)
+    matches=[]
+    def read_id(idx):
+        data_off=struct.unpack_from("<I", data, id_table+idx*4)[0]
+        p=data_off
+        while data[p]&0x80:
+            p+=1
+        p+=1
+        return data[p:data.index(bytes([0]),p)].decode("utf-8")
+    for idx in range(id_count):
+        if read_id(idx) == SLOT.decode("ascii"):
+            matches.append(idx)
+    if len(matches)!=1:
+        raise ValueError("Placeholder must exist in exactly one DEX string_id")
+    idx=matches[0]
+    before=read_id(idx-1) if idx>0 else ""
+    after=read_id(idx+1) if idx+1<id_count else "\uffff"
+    if not (before < encoded.decode("ascii") < after):
+        raise ValueError("Personalized DEX slot would corrupt string_id ordering")
+    mutable = bytearray(data.replace(SLOT, encoded, 1))
     mutable[12:32] = hashlib.sha1(mutable[32:]).digest()
     struct.pack_into("<I", mutable, 8, zlib.adler32(mutable[12:]) & 0xffffffff)
     if hashlib.sha1(mutable[32:]).digest() != mutable[12:32]:
@@ -54,9 +98,9 @@ def main() -> int:
             out.writestr(item, data)
     with zipfile.ZipFile(args.unsigned_output, "r") as verify:
         dex = verify.read(DEX)
-        if secret.encode("ascii") not in dex or SLOT in dex or verify.testzip():
+        if compact_slot(secret.encode("ascii")) not in dex or SLOT in dex or verify.testzip():
             raise RuntimeError("Personalized APK integrity test failed")
-    print("Personalized unsigned APK verified; must zipalign and sign with official apksigner")
+    print("DEX-safe personal slot verified; must zipalign and sign with official apksigner")
     return 0
 
 if __name__ == "__main__":

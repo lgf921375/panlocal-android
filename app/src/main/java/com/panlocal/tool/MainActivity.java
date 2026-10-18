@@ -92,7 +92,7 @@ public final class MainActivity extends Activity {
         LinearLayout hero=column();
         hero.setPadding(dp(20),dp(25),dp(20),dp(24));
         hero.setBackgroundColor(NAVY);outer.addView(hero);
-        hero.addView(text("PANLOCAL · 安卓本地版 V2.1",12,0xffa5c4fc,true),params(0));
+        hero.addView(text("PANLOCAL · 安卓本地版 V2.2",12,0xffa5c4fc,true),params(0));
         hero.addView(text("百度网盘直链助手",25,Color.WHITE,true),params(10));
         hero.addView(text("个人网盘快速搜索 · 自动恢复授权",13,0xffd0dcf0,false),params(10));
 
