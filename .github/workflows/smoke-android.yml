@@ -41,22 +41,16 @@ jobs:
           heap-size: 512M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: |
-            set -euo pipefail
-            gradle --no-daemon :app:assembleDebug
-            adb install -r app/build/outputs/apk/debug/app-debug.apk
-            adb logcat -c
-            adb shell am start -W -n com.panlocal.tool/.LocalDriveActivity
-            sleep 7
-            if ! adb shell pidof com.panlocal.tool; then
-              adb logcat -d -b main -b crash | tail -180
-              echo 'FAIL: app process exited after launch'
-              exit 1
-            fi
-            if adb logcat -d -b crash | grep -Eq 'FATAL EXCEPTION|Process: com.panlocal.tool'; then
-              adb logcat -d -b crash | tail -180
-              echo 'FAIL: Android fatal crash'
-              exit 1
-            fi
-            adb shell dumpsys activity activities | grep -m 1 'com.panlocal.tool/.LocalDriveActivity'
-            echo 'PASS: installed and launched without fatal exception'
+          script: bash scripts/smoke_android.sh
+      - name: Export Android SDK signing utility for local packaging
+        if: always()
+        run: |
+          mkdir -p signing-tools
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" signing-tools/
+          cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" signing-tools/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-signing-tools
+          path: signing-tools/
+          retention-days: 1

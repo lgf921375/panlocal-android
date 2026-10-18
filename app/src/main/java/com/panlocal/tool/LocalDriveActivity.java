@@ -104,7 +104,7 @@ public final class LocalDriveActivity extends Activity {
         layout.setPadding(dp(18),dp(18),dp(18),dp(30));
         layout.setBackgroundColor(0xfff3f6fa);
         sc.addView(layout);setContentView(sc);
-        layout.addView(label("PanLocal V2.0 · 我的网盘",22),space(0));
+        layout.addView(label("PanLocal V2.1 · 我的网盘",22),space(0));
         layout.addView(label("首次保存开发者密钥并授权一次。以后自动恢复账号、搜索文件，无需每次输入密钥或授权码（仅当百度授权失效时需要重新授权）。",13),space(8));
         stateText=label("正在检查本机已保存的授权…",13);
         layout.addView(stateText,space(12));
