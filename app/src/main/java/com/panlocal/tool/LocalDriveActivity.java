@@ -45,7 +45,8 @@ public final class LocalDriveActivity extends Activity {
     private TextView stateText;
     private LinearLayout layout,files;
     private TextView downloadInfo;
-    private Button downloadControl;
+    private Button downloadControl,copyFinalLinkButton;
+    private String verifiedFinalUrl="";
     private final Handler progressHandler=new Handler(Looper.getMainLooper());
     private boolean watchingProgress=false;
     private static final int SAVE_DOWNLOADED_FILE=6127, NOTIFY_PERMISSION=6128;
@@ -92,7 +93,7 @@ public final class LocalDriveActivity extends Activity {
         layout.setPadding(dp(18),dp(18),dp(18),dp(30));
         layout.setBackgroundColor(0xfff3f6fa);
         sc.addView(layout);setContentView(sc);
-        layout.addView(label("PanLocal V1.5 · 我的网盘",22),space(0));
+        layout.addView(label("PanLocal V1.6 · 我的网盘",22),space(0));
         layout.addView(label("首次保存开发者密钥并授权一次。以后自动恢复账号、搜索文件，无需每次输入密钥或授权码（仅当百度授权失效时需要重新授权）。",13),space(8));
         stateText=label("正在检查本机已保存的授权…",13);
         layout.addView(stateText,space(12));
@@ -131,6 +132,10 @@ public final class LocalDriveActivity extends Activity {
         search.setOnClickListener(v->search());
         files=new LinearLayout(this);files.setOrientation(LinearLayout.VERTICAL);
         layout.addView(files,space(8));
+        copyFinalLinkButton=button("复制验证后的最终下载直链",layout);
+        copyFinalLinkButton.setVisibility(android.view.View.GONE);
+        copyFinalLinkButton.setOnClickListener(v->copyVerifiedFinalLink());
+        layout.addView(label("提示：最终跳转 URL 是临时地址，可能含授权信息；浏览器或下载器仍可能需要 User-Agent: pan.baidu.com。复制后不要公开分享。",12),space(6));
         layout.addView(label("下载到手机",17),space(18));
         downloadInfo=label("选择文件后点“下载到手机”，即可在通知栏查看进度。大文件建议预留至少 3 GiB 空间。",13);
         layout.addView(downloadInfo,space(7));
@@ -152,6 +157,8 @@ public final class LocalDriveActivity extends Activity {
             advancedArea.setVisibility(show?android.view.View.VISIBLE:android.view.View.GONE);
             options.setText(show?"收起高级功能 ▲":"高级功能 / 诊断 ▼");
         });
+        Button oldHome=button("旧版分享链接与完整日志界面",advancedArea);
+        oldHome.setOnClickListener(v->startActivity(new Intent(this,MainActivity.class)));
         advancedArea.addView(label("已有下载链接：只验证首字节，不下载整个文件",13),space(3));
         dlinkInput=field("本机粘贴临时 dlink",advancedArea,true);
         Button direct=button("检测这个下载地址",advancedArea);
@@ -497,6 +504,7 @@ public final class LocalDriveActivity extends Activity {
         if(!verified){stateText.setText("请先验证授权。");return;}
         String name=query.getText().toString().trim();
         if(name.isEmpty()){stateText.setText("请输入搜索关键词。");return;}
+        clearVerifiedFinalLink();
         work("文件搜索",()->{
             JSONObject response=api("search","key",name,"recursion","1","num","30");
             JSONArray list=response.optJSONArray("list");
@@ -518,7 +526,7 @@ public final class LocalDriveActivity extends Activity {
                     if(isdir==0&&id.matches("[0-9]{1,22}")){
                         Button save=button("下载到手机",files);
                         save.setOnClickListener(v->beginDocumentDownload(id,filename,size));
-                        Button get=button("检查下载权限（只读首字节）",files);
+                        Button get=button("获取最终下载直链（自动验证）",files);
                         get.setOnClickListener(v->requestDlink(id));
                     }
                 }
@@ -630,18 +638,9 @@ public final class LocalDriveActivity extends Activity {
                 message("未能取得 HTTPS 下载地址：errno="+errno+"。可以保存 TXT 诊断日志。");return;
             }
             runOnUiThread(()->{
-                stateText.setText("已取得 dlink，正在用 OAuth 令牌和百度指定请求头检测下载权限…");
-                Button validate=button("应用内验证直链首字节（推荐）",files);
-                validate.setOnClickListener(v->checkDlink(link));
-                Button copy=button("复制原始 dlink（浏览器可能不能直接下载）",files);
-                copy.setOnClickListener(v->{
-                    ClipboardManager clip=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-                    if(clip!=null)clip.setPrimaryClip(ClipData.newPlainText("个人网盘临时地址",link));
-                    Toast.makeText(this,"已复制，链接可能很快过期",Toast.LENGTH_SHORT).show();
-                });
-                // One button: request fresh dlink, then automatically probe with OAuth.
-                new android.os.Handler(android.os.Looper.getMainLooper())
-                    .postDelayed(()->checkDlink(link),150L);
+                stateText.setText("已取得 dlink，正在验证最终跳转 URL…");
+                // Only one user action: dlink acquisition and authorized CDN probe.
+                new Handler(Looper.getMainLooper()).postDelayed(()->checkDlink(link),150L);
             });
         });
     }
@@ -670,7 +669,32 @@ public final class LocalDriveActivity extends Activity {
         }catch(Exception ignored){}
         return result;
     }
+    private void clearVerifiedFinalLink(){
+        verifiedFinalUrl="";
+        if(copyFinalLinkButton!=null)
+            runOnUiThread(()->copyFinalLinkButton.setVisibility(android.view.View.GONE));
+    }
+    private void copyVerifiedFinalLink(){
+        String link=verifiedFinalUrl;
+        if(link.isEmpty()){
+            stateText.setText("请先选择文件，点击“获取最终下载直链（自动验证）”。");
+            return;
+        }
+        // This is an explicit owner action. The destination URL can include a
+        // temporary signature or token, so never include it in logs or reports.
+        try{
+            URL destination=new URL(link);
+            if(!trustedDownloadHost(destination))throw new Exception("untrusted");
+            ClipboardManager clipboard=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
+            if(clipboard==null)throw new Exception("clipboard_unavailable");
+            clipboard.setPrimaryClip(ClipData.newPlainText("百度验证后的临时下载地址",link));
+            Toast.makeText(this,"已复制最终跳转 URL；注意有效期及请求头",Toast.LENGTH_LONG).show();
+        }catch(Exception ex){
+            stateText.setText("最终地址不符合可信下载域名要求，未复制。");
+        }
+    }
     private void checkDlink(String raw){
+        clearVerifiedFinalLink();
         final URL start;
         try{
             if(raw==null||raw.length()<35||raw.length()>12000)throw new Exception("invalid");
@@ -732,9 +756,18 @@ public final class LocalDriveActivity extends Activity {
                         boolean byteOk;
                         try(InputStream in=c.getInputStream()){byteOk=in.read()!=-1;}
                         DiagnosticLog.event("DLCHECK","fileByte="+byteOk+" http="+status);
-                        message(byteOk?
-                            "成功收到文件首字节！HTTP "+status+"。下载权限初步通过；整文件下载、断点续传和速度尚未验证。":
-                            "HTTP "+status+"，但没有读到文件数据。");
+                        if(byteOk){
+                            // Copy the final URL only after an authorized 200/206
+                            // returned actual file bytes. It remains temporary and
+                            // may still require the Baidu User-Agent.
+                            final String finalLink=url.toExternalForm();
+                            runOnUiThread(()->{
+                                verifiedFinalUrl=finalLink;
+                                copyFinalLinkButton.setVisibility(android.view.View.VISIBLE);
+                                stateText.setText("已验证最终下载地址，HTTP "+status+
+                                    "。点击“复制验证后的最终下载直链”；普通浏览器可能仍需下载请求头。");
+                            });
+                        }else message("HTTP "+status+"，但没有读到文件数据。");
                         return;
                     }
                     String[] err=serverError(c.getErrorStream());
