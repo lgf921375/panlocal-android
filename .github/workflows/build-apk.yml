@@ -51,6 +51,16 @@ jobs:
             app/src/testPlainJava/com/panlocal/tool/BrowserDirectLinkProbeSelfTest.java
           java -cp /tmp/panlocal-probe-test com.panlocal.tool.BrowserDirectLinkProbeSelfTest
 
+      - name: Test download range integrity (offline)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/panlocal-range-test
+          javac -encoding UTF-8 -d /tmp/panlocal-range-test \
+            app/src/main/java/com/panlocal/tool/DownloadRangeValidator.java \
+            app/src/testPlainJava/com/panlocal/tool/DownloadRangeValidatorSelfTest.java
+          java -cp /tmp/panlocal-range-test com.panlocal.tool.DownloadRangeValidatorSelfTest
+
       - name: Compile debug APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
@@ -60,8 +70,8 @@ jobs:
           set -euo pipefail
           test -s app/build/outputs/apk/debug/app-debug.apk
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/PanLocal-v1.9-placeholder-debug.apk
-          (cd dist && sha256sum PanLocal-v1.9-placeholder-debug.apk > SHA256SUMS.txt)
+          cp app/build/outputs/apk/debug/app-debug.apk dist/PanLocal-v2.0-placeholder-debug.apk
+          (cd dist && sha256sum PanLocal-v2.0-placeholder-debug.apk > SHA256SUMS.txt)
 
       - name: Upload phone-installable APK
         uses: actions/upload-artifact@v4

@@ -220,8 +220,16 @@ public final class BaiduDownloadService extends Service {
                                     throw new Exception("HTTP "+http+" "+errorResponse(con.getErrorStream()));
                                 }
                                 String range=con.getHeaderField("Content-Range");
-                                if(http==206 && (range==null||!range.startsWith("bytes "+downloaded+"-")))
-                                    throw new Exception("Content-Range 起始字节不符合预期");
+                                final long allowedEnd;
+                                try{
+                                    allowedEnd=DownloadRangeValidator.validate(
+                                        http,downloaded,expected,range,con.getContentLengthLong());
+                                }catch(IllegalArgumentException invalidRange){
+                                    DiagnosticLog.event("DOWNLOAD","rangeRejected reason="+invalidRange.getMessage());
+                                    throw new Exception("服务器分段长度或偏移不一致，已停止以保护文件");
+                                }
+                                DiagnosticLog.event("DOWNLOAD","rangeValidated http="+http+
+                                    " offset="+downloaded+" length="+(allowedEnd-downloaded));
                                 String contentType=con.getContentType();
                                 if(contentType!=null && (contentType.contains("json")||contentType.contains("text")||contentType.contains("html")))
                                     throw new Exception("服务器返回错误内容，不是文件");
@@ -231,7 +239,10 @@ public final class BaiduDownloadService extends Service {
                                     long lastUpdate=0;
                                     while(!pauseRequested && !cancelRequested && (n=input.read(buffer))!=-1){
                                         if(n==0)continue;
-                                        if(downloaded+n>expected)throw new Exception("服务器数据超出文件预期大小");
+                                        if(downloaded+n>allowedEnd)
+                                            throw new Exception("服务器发送的数据超过 Content-Range 声明");
+                                        if(downloaded+n>expected)
+                                            throw new Exception("服务器数据超出文件预期大小");
                                         out.write(buffer,0,n);
                                         downloaded+=n;
                                         long now=android.os.SystemClock.elapsedRealtime();
@@ -245,7 +256,11 @@ public final class BaiduDownloadService extends Service {
                                     }
                                 }
                                 if(pauseRequested||cancelRequested)break;
-                                if(downloaded==expected){complete();return;}
+                                if(downloaded==expected){
+                                    out.flush();
+                                    complete();
+                                    return;
+                                }
                                 // A partial EOF is not success; reconnect with Range.
                                 break;
                             }finally{con.disconnect();}

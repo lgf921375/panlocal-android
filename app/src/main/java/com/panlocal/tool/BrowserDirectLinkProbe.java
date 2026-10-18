@@ -32,12 +32,13 @@ public final class BrowserDirectLinkProbe {
         }
     }
     public static final class Report {
-        public final Probe range,normal,uaOnly,tokenOnly;
+        public final Probe range,normal,uaOnly,uaNoRange,tokenOnly;
         public final boolean oauthParamStripped, browserCandidate;
         public final String candidateUrl,reason;
-        Report(Probe range,Probe normal,Probe uaOnly,Probe tokenOnly,
+        Report(Probe range,Probe normal,Probe uaOnly,Probe uaNoRange,Probe tokenOnly,
                boolean stripped,boolean browserReady,String url,String detail){
-            this.range=range;this.normal=normal;this.uaOnly=uaOnly;this.tokenOnly=tokenOnly;
+            this.range=range;this.normal=normal;
+            this.uaOnly=uaOnly;this.uaNoRange=uaNoRange;this.tokenOnly=tokenOnly;
             this.oauthParamStripped=stripped;this.browserCandidate=browserReady;
             this.candidateUrl=url;this.reason=detail;
         }
@@ -147,7 +148,7 @@ public final class BrowserDirectLinkProbe {
         URL first=new URL(candidate);
         if(dangerousQuery(first)) {
             Probe refused=new Probe(-1,false,"unknown","","sensitive_parameters");
-            return new Report(refused,refused,refused,refused,stripped,false,
+            return new Report(refused,refused,refused,refused,refused,stripped,false,
                 "","candidate_contains_credentials");
         }
         // All profile requests are made directly from this phone. No server.
@@ -156,6 +157,9 @@ public final class BrowserDirectLinkProbe {
         Probe normal=request(candidate,false,CHROME_UA);
         // UA-only: no OAuth token, but the exact Baidu downloader UA.
         Probe uaOnly=request(candidate,true,BAIDU_UA);
+        // Check if the Baidu UA can download without a Range header.
+        // This is distinct from a stock Chrome browser: its UA is different.
+        Probe uaNoRange=request(candidate,false,BAIDU_UA);
         // OAuth-only: a valid account token, but an ordinary Chrome UA.
         // Only one byte requested; the token never goes to logs/clipboard.
         Probe tokenOnly=request(withOAuthToken(candidate,knownAccessToken),true,CHROME_UA);
@@ -168,6 +172,6 @@ public final class BrowserDirectLinkProbe {
         else if(tokenOnly.dataRead && !uaOnly.dataRead)detail="oauth_authentication_condition";
         else if(uaOnly.dataRead && tokenOnly.dataRead)detail="either_special_ua_or_oauth_condition";
         else detail="other_server_conditions";
-        return new Report(range,normal,uaOnly,tokenOnly,stripped,ready,result,detail);
+        return new Report(range,normal,uaOnly,uaNoRange,tokenOnly,stripped,ready,result,detail);
     }
 }

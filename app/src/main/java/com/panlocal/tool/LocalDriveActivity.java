@@ -104,7 +104,7 @@ public final class LocalDriveActivity extends Activity {
         layout.setPadding(dp(18),dp(18),dp(18),dp(30));
         layout.setBackgroundColor(0xfff3f6fa);
         sc.addView(layout);setContentView(sc);
-        layout.addView(label("PanLocal V1.9 · 我的网盘",22),space(0));
+        layout.addView(label("PanLocal V2.0 · 我的网盘",22),space(0));
         layout.addView(label("首次保存开发者密钥并授权一次。以后自动恢复账号、搜索文件，无需每次输入密钥或授权码（仅当百度授权失效时需要重新授权）。",13),space(8));
         stateText=label("正在检查本机已保存的授权…",13);
         layout.addView(stateText,space(12));
@@ -803,6 +803,14 @@ public final class LocalDriveActivity extends Activity {
                     DiagnosticLog.event("DLCHECK","hop="+hop+" http="+status+
                         " contentType="+(type.matches("[a-z0-9+.-]+/[a-z0-9+.-]+")?type:"unknown")+
                         " userAgentSet=true range0to0=true oauthTokenAttached=true");
+                    // Hostnames describe only the external CDN access path.
+                    // Never record the URI path, query, signed URL or token.
+                    DiagnosticLog.event("CDNTRACE","hop="+hop+
+                        " host="+url.getHost().toLowerCase(Locale.ROOT)+
+                        " http="+status+" hasRedirect="+(status>=300&&status<400)+
+                        " contentRangePresent="+(c.getHeaderField("Content-Range")!=null)+
+                        " acceptRangesPresent="+(c.getHeaderField("Accept-Ranges")!=null)+
+                        " responseBytes="+c.getContentLengthLong());
                     if(status==301||status==302||status==303||status==307||status==308){
                         String location=c.getHeaderField("Location");
                         if(location==null){message("下载服务器返回跳转，但缺少目标地址。");return;}
@@ -840,6 +848,8 @@ public final class LocalDriveActivity extends Activity {
                                 " normalByte="+test.normal.dataRead+
                                 " uaOnlyHttp="+test.uaOnly.http+
                                 " uaOnlyByte="+test.uaOnly.dataRead+
+                                " uaNoRangeHttp="+test.uaNoRange.http+
+                                " uaNoRangeByte="+test.uaNoRange.dataRead+
                                 " tokenOnlyHttp="+test.tokenOnly.http+
                                 " tokenOnlyByte="+test.tokenOnly.dataRead+
                                 " oauthParamStripped="+test.oauthParamStripped+
@@ -865,7 +875,8 @@ public final class LocalDriveActivity extends Activity {
                                         " 通过，但无授权普通浏览器模拟未通过。"+
                                         "普通 GET HTTP "+test.normal.http+
                                         "；Range HTTP "+test.range.http+
-                                        "。UA-only HTTP "+test.uaOnly.http+
+                                        "。UA-only Range HTTP "+test.uaOnly.http+
+                                        "；UA-only 普通 GET HTTP "+test.uaNoRange.http+
                                         "；OAuth-only HTTP "+test.tokenOnly.http+
                                         "。"+(test.uaOnly.dataRead?
                                             "百度专用 UA 在本机有效，但不符合普通浏览器直接下载要求。":
