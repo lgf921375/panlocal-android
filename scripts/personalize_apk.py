@@ -58,7 +58,7 @@ def patch_dex(data: bytes, key: bytes) -> bytes:
         while data[p]&0x80:
             p+=1
         p+=1
-        return data[p:data.index(bytes([0]),p)].decode("utf-8")
+        return data[p:data.index(bytes([0]),p)].decode("utf-8", errors="replace")
     for idx in range(id_count):
         if read_id(idx) == SLOT.decode("ascii"):
             matches.append(idx)
