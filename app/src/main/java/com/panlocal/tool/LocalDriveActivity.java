@@ -26,6 +26,10 @@ import java.net.HttpURLConnection;
 import java.net.URLEncoder;
 import java.net.URLDecoder;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.io.ByteArrayOutputStream;
 import java.util.Locale;
 import java.util.UUID;
@@ -49,7 +53,7 @@ public final class LocalDriveActivity extends Activity {
     private String verifiedFinalUrl="";
     private final Handler progressHandler=new Handler(Looper.getMainLooper());
     private boolean watchingProgress=false;
-    private static final int SAVE_DOWNLOADED_FILE=6127, NOTIFY_PERMISSION=6128;
+    private static final int SAVE_DOWNLOADED_FILE=6127, NOTIFY_PERMISSION=6128, EXPORT_AUTO_LOG=6129;
     private String pendingFileId,pendingFileName,pendingAccessToken;
     private long pendingFileBytes;
     private Uri pendingSaveUri;
@@ -93,7 +97,7 @@ public final class LocalDriveActivity extends Activity {
         layout.setPadding(dp(18),dp(18),dp(18),dp(30));
         layout.setBackgroundColor(0xfff3f6fa);
         sc.addView(layout);setContentView(sc);
-        layout.addView(label("PanLocal V1.7 · 我的网盘",22),space(0));
+        layout.addView(label("PanLocal V1.8 · 我的网盘",22),space(0));
         layout.addView(label("首次保存开发者密钥并授权一次。以后自动恢复账号、搜索文件，无需每次输入密钥或授权码（仅当百度授权失效时需要重新授权）。",13),space(8));
         stateText=label("正在检查本机已保存的授权…",13);
         layout.addView(stateText,space(12));
@@ -160,6 +164,9 @@ public final class LocalDriveActivity extends Activity {
             advancedArea.setVisibility(show?android.view.View.VISIBLE:android.view.View.GONE);
             options.setText(show?"收起高级功能 ▲":"高级功能 / 诊断 ▼");
         });
+        advancedArea.addView(label("本机诊断日志已自动开启，最多保留约 2 MiB，满额自动轮转。可随时导出脱敏 TXT，无需手动开启。",12),space(3));
+        Button exportLog=button("导出自动诊断 TXT",advancedArea);
+        exportLog.setOnClickListener(v->exportAutoDiagnostics());
         Button oldHome=button("旧版分享链接与完整日志界面",advancedArea);
         oldHome.setOnClickListener(v->startActivity(new Intent(this,MainActivity.class)));
         advancedArea.addView(label("已有下载链接：只验证首字节，不下载整个文件",13),space(3));
@@ -556,8 +563,35 @@ public final class LocalDriveActivity extends Activity {
             message("无法打开安卓文件保存界面，请检查是否安装系统文件管理器。");
         }
     }
+    private void exportAutoDiagnostics(){
+        Intent save=new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        save.addCategory(Intent.CATEGORY_OPENABLE);
+        save.setType("text/plain");
+        save.putExtra(Intent.EXTRA_TITLE,"PanLocal-auto-"+new SimpleDateFormat(
+            "yyyyMMdd-HHmmss",Locale.US).format(new Date())+".txt");
+        try{startActivityForResult(save,EXPORT_AUTO_LOG);}
+        catch(Exception e){message("无法打开安卓 TXT 保存窗口。");}
+    }
+    private void saveAutoDiagnostics(Uri destination){
+        new Thread(()->{
+            try(OutputStream out=getContentResolver().openOutputStream(destination,"wt")){
+                if(out==null)throw new Exception("no_output_stream");
+                out.write(DiagnosticLog.all().getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                message("诊断 TXT 已保存到选择的位置。请先检查内容再分享。");
+            }catch(Exception e){
+                DiagnosticLog.event("DIAG","exportFailed type="+e.getClass().getSimpleName());
+                message("诊断 TXT 导出失败："+e.getClass().getSimpleName());
+            }
+        },"panlocal-export-diagnostics").start();
+    }
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
         super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode==EXPORT_AUTO_LOG){
+            if(resultCode==RESULT_OK&&data!=null&&data.getData()!=null)
+                saveAutoDiagnostics(data.getData());
+            return;
+        }
         if(requestCode!=SAVE_DOWNLOADED_FILE)return;
         if(resultCode!=RESULT_OK||data==null||data.getData()==null){
             pendingFileId=null;pendingAccessToken=null;
@@ -787,11 +821,15 @@ public final class LocalDriveActivity extends Activity {
                             // authenticated download result.
                             final String finalLink=url.toExternalForm();
                             message("授权下载通过。正在独立检测普通浏览器访问条件，请稍等…");
-                            BrowserDirectLinkProbe.Report test=BrowserDirectLinkProbe.inspect(finalLink);
+                            BrowserDirectLinkProbe.Report test=BrowserDirectLinkProbe.inspect(finalLink,access);
                             DiagnosticLog.event("BROWSERTEST","rangeHttp="+test.range.http+
                                 " rangeByte="+test.range.dataRead+
                                 " normalHttp="+test.normal.http+
                                 " normalByte="+test.normal.dataRead+
+                                " uaOnlyHttp="+test.uaOnly.http+
+                                " uaOnlyByte="+test.uaOnly.dataRead+
+                                " tokenOnlyHttp="+test.tokenOnly.http+
+                                " tokenOnlyByte="+test.tokenOnly.dataRead+
                                 " oauthParamStripped="+test.oauthParamStripped+
                                 " browserCandidate="+test.browserCandidate+
                                 " reason="+test.reason);
@@ -811,7 +849,14 @@ public final class LocalDriveActivity extends Activity {
                                         " 通过，但无授权普通浏览器模拟未通过。"+
                                         "普通 GET HTTP "+test.normal.http+
                                         "；Range HTTP "+test.range.http+
-                                        "。不能把此地址当作免登录分享直链。");
+                                        "。UA-only HTTP "+test.uaOnly.http+
+                                        "；OAuth-only HTTP "+test.tokenOnly.http+
+                                        "。"+(test.uaOnly.dataRead?
+                                            "百度专用 UA 在本机有效，但不符合普通浏览器直接下载要求。":
+                                            test.tokenOnly.dataRead?
+                                            "普通浏览器 UA 配合授权有效，仍不符合免登录要求。":
+                                            "仅靠修改 UA 或提供单独 OAuth 均未通过，服务器仍有其他限制。")+
+                                        "不能把此地址当作免登录分享直链。");
                                 }
                             });
                         }else message("HTTP "+status+"，但没有读到文件数据。");

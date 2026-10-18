@@ -4,6 +4,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -15,6 +16,7 @@ import java.util.Locale;
  */
 public final class BrowserDirectLinkProbe {
     private BrowserDirectLinkProbe(){}
+    private static final String BAIDU_UA="pan.baidu.com";
     private static final String CHROME_UA =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "+
         "(KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36";
@@ -30,11 +32,12 @@ public final class BrowserDirectLinkProbe {
         }
     }
     public static final class Report {
-        public final Probe range,normal;
+        public final Probe range,normal,uaOnly,tokenOnly;
         public final boolean oauthParamStripped, browserCandidate;
         public final String candidateUrl,reason;
-        Report(Probe range,Probe normal,boolean stripped,boolean browserReady,String url,String detail){
-            this.range=range;this.normal=normal;
+        Report(Probe range,Probe normal,Probe uaOnly,Probe tokenOnly,
+               boolean stripped,boolean browserReady,String url,String detail){
+            this.range=range;this.normal=normal;this.uaOnly=uaOnly;this.tokenOnly=tokenOnly;
             this.oauthParamStripped=stripped;this.browserCandidate=browserReady;
             this.candidateUrl=url;this.reason=detail;
         }
@@ -80,6 +83,9 @@ public final class BrowserDirectLinkProbe {
             mime.contains("xml")||mime.contains("html"));
     }
     static Probe request(String raw,boolean range){
+        return request(raw,range,CHROME_UA);
+    }
+    static Probe request(String raw,boolean range,String userAgent){
         URL current;
         try{current=new URL(raw);}
         catch(Exception ex){return new Probe(-1,false,"unknown","","invalid_url");}
@@ -93,7 +99,7 @@ public final class BrowserDirectLinkProbe {
                 con.setConnectTimeout(12000);
                 con.setReadTimeout(16000);
                 con.setRequestMethod("GET");
-                con.setRequestProperty("User-Agent",CHROME_UA);
+                con.setRequestProperty("User-Agent",userAgent);
                 con.setRequestProperty("Accept","*/*");
                 if(range)con.setRequestProperty("Range","bytes=0-0");
                 // No Authorization, Cookie, Referer or Baidu-specific User-Agent.
@@ -128,23 +134,40 @@ public final class BrowserDirectLinkProbe {
         }
         return new Probe(-1,false,"unknown","","redirect_limit");
     }
-    public static Report inspect(String authorizedFinalUrl) throws Exception {
-        // Do not test or reveal the OAuth value from V1.6 if it is still in URL.
+    static String withOAuthToken(String unsigned,String access) throws Exception {
+        URL url=new URL(unsigned);
+        if(!trusted(url)||dangerousQuery(url))throw new Exception("invalid_candidate");
+        if(access==null||access.length()<10)throw new Exception("invalid_oauth");
+        return unsigned+(url.getQuery()==null?"?":"&")+"access_token="+URLEncoder.encode(access,"UTF-8");
+    }
+    public static Report inspect(String authorizedFinalUrl,String knownAccessToken) throws Exception {
+        // Preserve the signed CDN URL; only strip the OAuth access token if present.
         String candidate=withoutOAuthToken(authorizedFinalUrl);
         boolean stripped=!candidate.equals(authorizedFinalUrl);
         URL first=new URL(candidate);
-        if(dangerousQuery(first))
-            return new Report(new Probe(-1,false,"unknown","","sensitive_parameters"),
-                new Probe(-1,false,"unknown","","sensitive_parameters"),
-                stripped,false,"","candidate_contains_credentials");
-        Probe range=request(candidate,true);
-        // A real browser navigation does not require a manual Range header.
-        Probe normal=request(candidate,false);
+        if(dangerousQuery(first)) {
+            Probe refused=new Probe(-1,false,"unknown","","sensitive_parameters");
+            return new Report(refused,refused,refused,refused,stripped,false,
+                "","candidate_contains_credentials");
+        }
+        // All profile requests are made directly from this phone. No server.
+        // Normal GET is deliberately tested without Range, Cookie or OAuth.
+        Probe range=request(candidate,true,CHROME_UA);
+        Probe normal=request(candidate,false,CHROME_UA);
+        // UA-only: no OAuth token, but the exact Baidu downloader UA.
+        Probe uaOnly=request(candidate,true,BAIDU_UA);
+        // OAuth-only: a valid account token, but an ordinary Chrome UA.
+        // Only one byte requested; the token never goes to logs/clipboard.
+        Probe tokenOnly=request(withOAuthToken(candidate,knownAccessToken),true,CHROME_UA);
         URL checked=new URL(normal.finalUrl.isEmpty()?candidate:normal.finalUrl);
         boolean ready=normal.dataRead && trusted(checked) && !dangerousQuery(checked);
         String result=ready?normal.finalUrl:"";
-        String detail=ready?"same_device_browser_request_succeeded":
-            normal.dataRead?"redirect_contains_credentials":"normal_browser_request_failed";
-        return new Report(range,normal,stripped,ready,result,detail);
+        String detail;
+        if(ready)detail="same_device_browser_request_succeeded";
+        else if(uaOnly.dataRead && !tokenOnly.dataRead)detail="baidu_user_agent_condition";
+        else if(tokenOnly.dataRead && !uaOnly.dataRead)detail="oauth_authentication_condition";
+        else if(uaOnly.dataRead && tokenOnly.dataRead)detail="either_special_ua_or_oauth_condition";
+        else detail="other_server_conditions";
+        return new Report(range,normal,uaOnly,tokenOnly,stripped,ready,result,detail);
     }
 }

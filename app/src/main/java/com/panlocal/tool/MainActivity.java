@@ -92,7 +92,7 @@ public final class MainActivity extends Activity {
         LinearLayout hero=column();
         hero.setPadding(dp(20),dp(25),dp(20),dp(24));
         hero.setBackgroundColor(NAVY);outer.addView(hero);
-        hero.addView(text("PANLOCAL · 安卓本地版 V1.5",12,0xffa5c4fc,true),params(0));
+        hero.addView(text("PANLOCAL · 安卓本地版 V1.8",12,0xffa5c4fc,true),params(0));
         hero.addView(text("百度网盘直链助手",25,Color.WHITE,true),params(10));
         hero.addView(text("个人网盘快速搜索 · 自动恢复授权",13,0xffd0dcf0,false),params(10));
 
@@ -164,10 +164,10 @@ public final class MainActivity extends Activity {
         content.addView(traceCard,params(16));
         traceCard.setVisibility(View.GONE);
         traceCard.addView(text("04  本地诊断日志",18,NAVY,true),params(0));
-        traceCard.addView(text("开启后自动在APP私有目录保留完整日志，重启APP仍可恢复。点击保存TXT可选择手机文件夹，不需要存储权限。最多约2MB，重新开始会清空旧记录。不会记录密码、令牌和完整链接。",12,GREY,false),params(8));
-        Button traceStart=button("开始诊断（清空旧记录）",true);
+        traceCard.addView(text("日志随 APP 自动启动并保存在私有目录，重启继续记录；达到约2MB时自动保留近期记录。点击保存TXT可选择手机文件夹，无需存储权限。不会记录密码、令牌或完整链接。",12,GREY,false),params(8));
+        Button traceStart=button("清空旧日志（可选）",false);
         traceCard.addView(traceStart,params(12));
-        traceStart.setOnClickListener(v->{DiagnosticLog.start();DiagnosticLog.setActive(this,true);refreshDiagnostics();toast("记录已开始，并自动保存在APP中");});
+        traceStart.setOnClickListener(v->{DiagnosticLog.start();DiagnosticLog.setActive(this,true);refreshDiagnostics();toast("旧日志已清空，自动记录继续");});
         Button saveTxt=button("保存完整日志为TXT",true);
         traceCard.addView(saveTxt,params(8));
         saveTxt.setOnClickListener(v->saveTxt());
@@ -193,7 +193,7 @@ public final class MainActivity extends Activity {
         Button refresh=button("刷新日志显示",false);
         traceCard.addView(refresh,params(8));
         refresh.setOnClickListener(v->refreshDiagnostics());
-        diagnosticText=text("尚未开启诊断。",11,GREY,false);
+        diagnosticText=text("诊断已自动开启。",11,GREY,false);
         diagnosticText.setTypeface(Typeface.MONOSPACE);
         diagnosticText.setTextIsSelectable(true);
         traceCard.addView(diagnosticText,params(10));

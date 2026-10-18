@@ -24,6 +24,14 @@ public final class BrowserDirectLinkProbeSelfTest {
             .equals("https://d.pcs.baidu.com/f"),"Last query param not removed");
         check(BrowserDirectLinkProbe.withoutOAuthToken("https://d.pcs.baidu.com/f?sign=x")
             .equals("https://d.pcs.baidu.com/f?sign=x"),"No-op changed unsigned URL");
-        System.out.println("PASS: browser candidate URL sanitization and trusted hosts");
+        String withToken=BrowserDirectLinkProbe.withOAuthToken(removed,"TEST-ACCESS-TOKEN-1234567");
+        check(withToken.startsWith(removed+"&access_token="),"OAuth-only test must append an access token");
+        check(BrowserDirectLinkProbe.dangerousQuery(new URL(withToken)),
+            "Authorized test URL must never be treated as a public candidate");
+        check(BrowserDirectLinkProbe.withoutOAuthToken(withToken).equals(removed),
+            "OAuth-only test must restore exact signed candidate URL");
+        check(!BrowserDirectLinkProbe.withoutOAuthToken(removed).contains("access_token"),
+            "No OAuth token may leak to candidate");
+        System.out.println("PASS: four browser/UA/OAuth profiles and safe URL normalization");
     }
 }
