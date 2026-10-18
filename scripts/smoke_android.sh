@@ -34,6 +34,10 @@ adb uninstall com.panlocal.tool
 # First isolate effects of repacking/signing WITHOUT patching any DEX strings.
 BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
 "$BUILD_TOOLS/zipalign" -f 4 "$BASE" /tmp/resigned-aligned.apk
+keytool -genkeypair -noprompt -keystore /tmp/owner-ci.jks -alias panlocal \
+  -storepass example-pass-12345 -keypass example-pass-12345 \
+  -keyalg RSA -keysize 3072 -validity 3650 \
+  -dname "CN=PanLocal Test APK, OU=CI, O=PanLocal, C=SG"
 "$BUILD_TOOLS/apksigner" sign --ks /tmp/owner-ci.jks --ks-key-alias panlocal \
   --ks-pass pass:example-pass-12345 --key-pass pass:example-pass-12345 \
   --out /tmp/resigned.apk /tmp/resigned-aligned.apk
@@ -47,10 +51,6 @@ unset PANLOCAL_EMBEDDED_SECRET
 
 "$BUILD_TOOLS/zipalign" -f 4 /tmp/owner-unsigned.apk /tmp/owner-aligned.apk
 "$BUILD_TOOLS/zipalign" -c 4 /tmp/owner-aligned.apk
-keytool -genkeypair -noprompt -keystore /tmp/owner-ci.jks -alias panlocal \
-  -storepass example-pass-12345 -keypass example-pass-12345 \
-  -keyalg RSA -keysize 3072 -validity 3650 \
-  -dname "CN=PanLocal Test APK, OU=CI, O=PanLocal, C=SG"
 "$BUILD_TOOLS/apksigner" sign --ks /tmp/owner-ci.jks --ks-key-alias panlocal \
   --ks-pass pass:example-pass-12345 --key-pass pass:example-pass-12345 \
   --out /tmp/owner-personal-smoke.apk /tmp/owner-aligned.apk
@@ -58,6 +58,6 @@ keytool -genkeypair -noprompt -keystore /tmp/owner-ci.jks -alias panlocal \
 adb install -r --no-incremental /tmp/owner-personal-smoke.apk
 smoke_launch "post-injection and official APK signature"
 adb shell uiautomator dump /sdcard/window.xml || :
-adb shell cat /sdcard/window.xml | grep -F 'PanLocal V2.1' >/dev/null || \
+adb shell cat /sdcard/window.xml | grep -F 'PanLocal V2.2' >/dev/null || \
   echo 'NOTE: UI text not visible in UIAutomator snapshot'
 echo "PASS: both plain and personalized APK launched"
