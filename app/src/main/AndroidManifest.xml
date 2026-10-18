@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
  <uses-permission android:name="android.permission.INTERNET"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+ <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
  <application android:label="网盘直链助手（实验版）" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false" android:allowBackup="false">
+  <service android:name=".BaiduDownloadService" android:exported="false"
+     android:foregroundServiceType="dataSync" android:stopWithTask="false" />
   <activity android:name=".BaiduLoginActivity" android:exported="false" />
   <activity android:name=".MyDriveActivity" android:exported="false" />
   <activity android:name=".LocalDriveActivity" android:exported="false" />

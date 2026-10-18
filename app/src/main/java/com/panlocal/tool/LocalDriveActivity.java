@@ -8,6 +8,10 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.content.pm.PackageManager;
 import android.text.InputType;
 import android.widget.Button;
 import android.widget.EditText;
@@ -40,6 +44,14 @@ public final class LocalDriveActivity extends Activity {
     private LinearLayout setupArea,authorizationArea,advancedArea;
     private TextView stateText;
     private LinearLayout layout,files;
+    private TextView downloadInfo;
+    private Button downloadControl;
+    private final Handler progressHandler=new Handler(Looper.getMainLooper());
+    private boolean watchingProgress=false;
+    private static final int SAVE_DOWNLOADED_FILE=6127, NOTIFY_PERMISSION=6128;
+    private String pendingFileId,pendingFileName,pendingAccessToken;
+    private long pendingFileBytes;
+    private Uri pendingSaveUri;
     private String token="",csrf="";
     private boolean busy=false,verified=false;
     private interface Work{void run() throws Exception;}
@@ -80,7 +92,7 @@ public final class LocalDriveActivity extends Activity {
         layout.setPadding(dp(18),dp(18),dp(18),dp(30));
         layout.setBackgroundColor(0xfff3f6fa);
         sc.addView(layout);setContentView(sc);
-        layout.addView(label("PanLocal V1.4 · 我的网盘",22),space(0));
+        layout.addView(label("PanLocal V1.5 · 我的网盘",22),space(0));
         layout.addView(label("首次保存开发者密钥并授权一次。以后自动恢复账号、搜索文件，无需每次输入密钥或授权码（仅当百度授权失效时需要重新授权）。",13),space(8));
         stateText=label("正在检查本机已保存的授权…",13);
         layout.addView(stateText,space(12));
@@ -119,6 +131,16 @@ public final class LocalDriveActivity extends Activity {
         search.setOnClickListener(v->search());
         files=new LinearLayout(this);files.setOrientation(LinearLayout.VERTICAL);
         layout.addView(files,space(8));
+        layout.addView(label("下载到手机",17),space(18));
+        downloadInfo=label("选择文件后点“下载到手机”，即可在通知栏查看进度。大文件建议预留至少 3 GiB 空间。",13);
+        layout.addView(downloadInfo,space(7));
+        downloadControl=button("暂停下载",layout);
+        downloadControl.setVisibility(android.view.View.GONE);
+        downloadControl.setOnClickListener(v->{
+            String action="paused".equals(BaiduDownloadService.state)?
+                BaiduDownloadService.ACTION_RESUME:BaiduDownloadService.ACTION_PAUSE;
+            startService(new Intent(this,BaiduDownloadService.class).setAction(action));
+        });
 
         Button options=button("高级功能 / 诊断 ▼",layout);
         advancedArea=new LinearLayout(this);
@@ -494,12 +516,106 @@ public final class LocalDriveActivity extends Activity {
                     TextView info=label(filename+"\n路径："+path+"\n大小："+String.format(Locale.US,"%.2f MiB",size/1048576d),13);
                     files.addView(info,space(13));
                     if(isdir==0&&id.matches("[0-9]{1,22}")){
-                        Button get=button("检查此文件能否下载",files);
+                        Button save=button("下载到手机",files);
+                        save.setOnClickListener(v->beginDocumentDownload(id,filename,size));
+                        Button get=button("检查下载权限（只读首字节）",files);
                         get.setOnClickListener(v->requestDlink(id));
                     }
                 }
             });
         });
+    }
+    private void beginDocumentDownload(String fileId,String name,long bytes){
+        if(!verified||token.isEmpty()){
+            message("需要先登录百度网盘后下载。");return;
+        }
+        String existing=BaiduDownloadService.state;
+        if("running".equals(existing)||"pausing".equals(existing)||"paused".equals(existing)){
+            message("已有下载任务。请先在下载状态处暂停、继续或停止。");return;
+        }
+        pendingFileId=fileId;pendingFileName=name;pendingFileBytes=bytes;
+        pendingAccessToken=token;
+        Intent picker=new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        picker.addCategory(Intent.CATEGORY_OPENABLE);
+        picker.setType(name.toLowerCase(Locale.ROOT).endsWith(".mp4")?"video/mp4":"application/octet-stream");
+        picker.putExtra(Intent.EXTRA_TITLE,name);
+        try{startActivityForResult(picker,SAVE_DOWNLOADED_FILE);}
+        catch(Exception e){
+            pendingFileId=null;pendingAccessToken=null;
+            message("无法打开安卓文件保存界面，请检查是否安装系统文件管理器。");
+        }
+    }
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+        super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode!=SAVE_DOWNLOADED_FILE)return;
+        if(resultCode!=RESULT_OK||data==null||data.getData()==null){
+            pendingFileId=null;pendingAccessToken=null;
+            message("已取消保存文件");return;
+        }
+        pendingSaveUri=data.getData();
+        try{
+            getContentResolver().takePersistableUriPermission(pendingSaveUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        }catch(Exception ignored){}
+        if(Build.VERSION.SDK_INT>=33 &&
+            checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=PackageManager.PERMISSION_GRANTED){
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},NOTIFY_PERMISSION);
+        }else startDownloadService();
+    }
+    @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grants){
+        super.onRequestPermissionsResult(requestCode,permissions,grants);
+        if(requestCode==NOTIFY_PERMISSION)startDownloadService();
+    }
+    private void startDownloadService(){
+        if(pendingFileId==null||pendingSaveUri==null||pendingAccessToken==null)return;
+        Intent work=new Intent(this,BaiduDownloadService.class).setAction(BaiduDownloadService.ACTION_START);
+        work.putExtra("fsid",pendingFileId);
+        work.putExtra("filename",pendingFileName);
+        work.putExtra("size",pendingFileBytes);
+        work.putExtra("uri",pendingSaveUri.toString());
+        work.putExtra("token",pendingAccessToken);
+        pendingFileId=null;pendingFileName=null;pendingAccessToken=null;pendingSaveUri=null;
+        try{
+            if(Build.VERSION.SDK_INT>=26)startForegroundService(work);
+            else startService(work);
+            stateText.setText("下载已启动，请查看下方下载进度或手机通知栏。");
+            updateDownloadProgress();
+        }catch(Exception e){
+            stateText.setText("无法启动后台下载服务："+e.getClass().getSimpleName());
+        }
+    }
+    private void updateDownloadProgress(){
+        if(downloadInfo==null)return;
+        String st=BaiduDownloadService.state;
+        String detail=BaiduDownloadService.status;
+        long got=BaiduDownloadService.downloaded,needed=BaiduDownloadService.total;
+        if("idle".equals(st))return;
+        String percentage=needed>0?"（"+Math.min(100,(got*100/needed))+"%）":"";
+        downloadInfo.setText(detail+percentage+"\n已接收 "+
+            String.format(Locale.US,"%.1f / %.1f MiB",got/1048576d,needed/1048576d));
+        boolean paused="paused".equals(st);
+        downloadControl.setVisibility(("running".equals(st)||"pausing".equals(st)||paused)?
+            android.view.View.VISIBLE:android.view.View.GONE);
+        downloadControl.setText(paused?"继续下载":"暂停下载");
+        downloadControl.setEnabled(!"pausing".equals(st));
+    }
+    private final Runnable progressPoll=new Runnable(){
+        @Override public void run(){
+            if(!watchingProgress)return;
+            updateDownloadProgress();
+            progressHandler.postDelayed(this,1100);
+        }
+    };
+    @Override protected void onResume(){
+        super.onResume();
+        watchingProgress=true;
+        progressHandler.removeCallbacks(progressPoll);
+        progressHandler.post(progressPoll);
+    }
+    @Override protected void onPause(){
+        watchingProgress=false;
+        progressHandler.removeCallbacks(progressPoll);
+        super.onPause();
     }
     private void requestDlink(String id){
         if(!verified){message("令牌尚未验证。");return;}
@@ -631,6 +747,7 @@ public final class LocalDriveActivity extends Activity {
         });
     }
     @Override protected void onDestroy(){
+        watchingProgress=false;progressHandler.removeCallbacks(progressPoll);
         token="";verified=false;
         if(secretEntry!=null)secretEntry.setText("");
         if(authCodeEntry!=null)authCodeEntry.setText("");
