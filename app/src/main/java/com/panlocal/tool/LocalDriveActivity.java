@@ -45,7 +45,7 @@ public final class LocalDriveActivity extends Activity {
     private TextView stateText;
     private LinearLayout layout,files;
     private TextView downloadInfo;
-    private Button downloadControl,copyFinalLinkButton;
+    private Button downloadControl,copyFinalLinkButton,openBrowserLinkButton;
     private String verifiedFinalUrl="";
     private final Handler progressHandler=new Handler(Looper.getMainLooper());
     private boolean watchingProgress=false;
@@ -93,7 +93,7 @@ public final class LocalDriveActivity extends Activity {
         layout.setPadding(dp(18),dp(18),dp(18),dp(30));
         layout.setBackgroundColor(0xfff3f6fa);
         sc.addView(layout);setContentView(sc);
-        layout.addView(label("PanLocal V1.6 · 我的网盘",22),space(0));
+        layout.addView(label("PanLocal V1.7 · 我的网盘",22),space(0));
         layout.addView(label("首次保存开发者密钥并授权一次。以后自动恢复账号、搜索文件，无需每次输入密钥或授权码（仅当百度授权失效时需要重新授权）。",13),space(8));
         stateText=label("正在检查本机已保存的授权…",13);
         layout.addView(stateText,space(12));
@@ -132,10 +132,13 @@ public final class LocalDriveActivity extends Activity {
         search.setOnClickListener(v->search());
         files=new LinearLayout(this);files.setOrientation(LinearLayout.VERTICAL);
         layout.addView(files,space(8));
-        copyFinalLinkButton=button("复制验证后的最终下载直链",layout);
+        copyFinalLinkButton=button("复制普通浏览器候选直链",layout);
         copyFinalLinkButton.setVisibility(android.view.View.GONE);
         copyFinalLinkButton.setOnClickListener(v->copyVerifiedFinalLink());
-        layout.addView(label("提示：最终跳转 URL 是临时地址，可能含授权信息；浏览器或下载器仍可能需要 User-Agent: pan.baidu.com。复制后不要公开分享。",12),space(6));
+        openBrowserLinkButton=button("用手机浏览器实际测试该地址",layout);
+        openBrowserLinkButton.setVisibility(android.view.View.GONE);
+        openBrowserLinkButton.setOnClickListener(v->openBrowserLink());
+        layout.addView(label("只有无额外 OAuth / Cookie / 百度专用 UA 的普通 GET 成功读到文件，才显示复制按钮。结果仅代表本机当时有效，跨设备、有效期仍需验证。",12),space(6));
         layout.addView(label("下载到手机",17),space(18));
         downloadInfo=label("选择文件后点“下载到手机”，即可在通知栏查看进度。大文件建议预留至少 3 GiB 空间。",13);
         layout.addView(downloadInfo,space(7));
@@ -671,8 +674,26 @@ public final class LocalDriveActivity extends Activity {
     }
     private void clearVerifiedFinalLink(){
         verifiedFinalUrl="";
-        if(copyFinalLinkButton!=null)
-            runOnUiThread(()->copyFinalLinkButton.setVisibility(android.view.View.GONE));
+        runOnUiThread(()->{
+            if(copyFinalLinkButton!=null)
+                copyFinalLinkButton.setVisibility(android.view.View.GONE);
+            if(openBrowserLinkButton!=null)
+                openBrowserLinkButton.setVisibility(android.view.View.GONE);
+        });
+    }
+    private void openBrowserLink(){
+        String link=verifiedFinalUrl;
+        if(link.isEmpty()){stateText.setText("没有通过独立浏览器请求检测的地址。");return;}
+        try{
+            URL candidate=new URL(link);
+            if(!BrowserDirectLinkProbe.trusted(candidate)||
+                BrowserDirectLinkProbe.dangerousQuery(candidate))throw new Exception("unsafe");
+            Intent intent=new Intent(Intent.ACTION_VIEW,Uri.parse(link));
+            intent.addCategory(Intent.CATEGORY_BROWSABLE);
+            startActivity(intent);
+        }catch(Exception e){
+            stateText.setText("无法打开手机浏览器或地址含不安全授权参数。");
+        }
     }
     private void copyVerifiedFinalLink(){
         String link=verifiedFinalUrl;
@@ -680,15 +701,17 @@ public final class LocalDriveActivity extends Activity {
             stateText.setText("请先选择文件，点击“获取最终下载直链（自动验证）”。");
             return;
         }
-        // This is an explicit owner action. The destination URL can include a
-        // temporary signature or token, so never include it in logs or reports.
+        // This is the independently verified browser candidate, never a raw
+        // authorized URL with an OAuth token. Expiring CDN signatures may remain.
         try{
             URL destination=new URL(link);
-            if(!trustedDownloadHost(destination))throw new Exception("untrusted");
+            if(!trustedDownloadHost(destination)||
+                BrowserDirectLinkProbe.dangerousQuery(destination))
+                throw new Exception("untrusted_or_sensitive");
             ClipboardManager clipboard=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
             if(clipboard==null)throw new Exception("clipboard_unavailable");
-            clipboard.setPrimaryClip(ClipData.newPlainText("百度验证后的临时下载地址",link));
-            Toast.makeText(this,"已复制最终跳转 URL；注意有效期及请求头",Toast.LENGTH_LONG).show();
+            clipboard.setPrimaryClip(ClipData.newPlainText("本机测试通过的浏览器候选下载地址",link));
+            Toast.makeText(this,"已复制临时链接；能否跨手机下载还需要测试",Toast.LENGTH_LONG).show();
         }catch(Exception ex){
             stateText.setText("最终地址不符合可信下载域名要求，未复制。");
         }
@@ -757,15 +780,39 @@ public final class LocalDriveActivity extends Activity {
                         try(InputStream in=c.getInputStream()){byteOk=in.read()!=-1;}
                         DiagnosticLog.event("DLCHECK","fileByte="+byteOk+" http="+status);
                         if(byteOk){
-                            // Copy the final URL only after an authorized 200/206
-                            // returned actual file bytes. It remains temporary and
-                            // may still require the Baidu User-Agent.
+                            // Authorized data was received. Independently retry
+                            // the CDN URL with a standard mobile Chrome UA,
+                            // without OAuth query token, Cookie or special headers.
+                            // Never claim a shareable URL based only on the
+                            // authenticated download result.
                             final String finalLink=url.toExternalForm();
+                            message("授权下载通过。正在独立检测普通浏览器访问条件，请稍等…");
+                            BrowserDirectLinkProbe.Report test=BrowserDirectLinkProbe.inspect(finalLink);
+                            DiagnosticLog.event("BROWSERTEST","rangeHttp="+test.range.http+
+                                " rangeByte="+test.range.dataRead+
+                                " normalHttp="+test.normal.http+
+                                " normalByte="+test.normal.dataRead+
+                                " oauthParamStripped="+test.oauthParamStripped+
+                                " browserCandidate="+test.browserCandidate+
+                                " reason="+test.reason);
                             runOnUiThread(()->{
-                                verifiedFinalUrl=finalLink;
-                                copyFinalLinkButton.setVisibility(android.view.View.VISIBLE);
-                                stateText.setText("已验证最终下载地址，HTTP "+status+
-                                    "。点击“复制验证后的最终下载直链”；普通浏览器可能仍需下载请求头。");
+                                if(test.browserCandidate){
+                                    verifiedFinalUrl=test.candidateUrl;
+                                    copyFinalLinkButton.setVisibility(android.view.View.VISIBLE);
+                                    openBrowserLinkButton.setVisibility(android.view.View.VISIBLE);
+                                    stateText.setText("授权下载 HTTP "+status+
+                                        " 通过。无授权浏览器模拟：普通 GET HTTP "+
+                                        test.normal.http+"，已收到文件数据。仅证明本机可访问，可复制临时候选直链；仍需另一台手机测试。");
+                                }else{
+                                    verifiedFinalUrl="";
+                                    copyFinalLinkButton.setVisibility(android.view.View.GONE);
+                                    openBrowserLinkButton.setVisibility(android.view.View.GONE);
+                                    stateText.setText("授权下载 HTTP "+status+
+                                        " 通过，但无授权普通浏览器模拟未通过。"+
+                                        "普通 GET HTTP "+test.normal.http+
+                                        "；Range HTTP "+test.range.http+
+                                        "。不能把此地址当作免登录分享直链。");
+                                }
                             });
                         }else message("HTTP "+status+"，但没有读到文件数据。");
                         return;
