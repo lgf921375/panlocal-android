@@ -90,6 +90,13 @@ public final class LocalDriveActivity extends Activity {
     @Override public void onCreate(Bundle saved){
         super.onCreate(saved);
         DiagnosticLog.init(getApplicationContext());
+        try{
+            if(OwnerTestingSeed.initialize(this,DEFAULT_APP_KEY)){
+                DiagnosticLog.event("LOCALDRIVE","ownerCredentialInitialized=true");
+            }
+        }catch(Exception e){
+            DiagnosticLog.event("LOCALDRIVE","ownerCredentialInitFailure="+e.getClass().getSimpleName());
+        }
         getWindow().setStatusBarColor(0xff152442);
         getWindow().setNavigationBarColor(0xff152442);
         ScrollView sc=new ScrollView(this);
@@ -97,7 +104,7 @@ public final class LocalDriveActivity extends Activity {
         layout.setPadding(dp(18),dp(18),dp(18),dp(30));
         layout.setBackgroundColor(0xfff3f6fa);
         sc.addView(layout);setContentView(sc);
-        layout.addView(label("PanLocal V1.8 · 我的网盘",22),space(0));
+        layout.addView(label("PanLocal V1.9 · 我的网盘",22),space(0));
         layout.addView(label("首次保存开发者密钥并授权一次。以后自动恢复账号、搜索文件，无需每次输入密钥或授权码（仅当百度授权失效时需要重新授权）。",13),space(8));
         stateText=label("正在检查本机已保存的授权…",13);
         layout.addView(stateText,space(12));
@@ -305,6 +312,7 @@ public final class LocalDriveActivity extends Activity {
         secretEntry.setText("");
         try{
             LocalCredentialVault.save(this,key,secret);
+            OwnerTestingSeed.enable(this);
             DiagnosticLog.event("LOCALDRIVE","developerCredentialsSavedLocally=true (no values)");
             setupArea.setVisibility(android.view.View.GONE);
             authorizationArea.setVisibility(android.view.View.VISIBLE);
@@ -317,6 +325,7 @@ public final class LocalDriveActivity extends Activity {
     private void clearOwnerCredentials(){
         try{
             LocalCredentialVault.clear(this);
+            OwnerTestingSeed.disable(this);
             token="";verified=false;
             appKey.setText(DEFAULT_APP_KEY);
             secretEntry.setText("");
@@ -820,6 +829,9 @@ public final class LocalDriveActivity extends Activity {
                             // Never claim a shareable URL based only on the
                             // authenticated download result.
                             final String finalLink=url.toExternalForm();
+                            DiagnosticLog.event("CDNTRACE","authorizedFinalHost="+url.getHost().toLowerCase(Locale.ROOT)+
+                                " queryPresent="+(url.getQuery()!=null)+
+                                " oauthInFinal="+(url.getQuery()!=null && url.getQuery().contains("access_token=")));
                             message("授权下载通过。正在独立检测普通浏览器访问条件，请稍等…");
                             BrowserDirectLinkProbe.Report test=BrowserDirectLinkProbe.inspect(finalLink,access);
                             DiagnosticLog.event("BROWSERTEST","rangeHttp="+test.range.http+
@@ -833,6 +845,10 @@ public final class LocalDriveActivity extends Activity {
                                 " oauthParamStripped="+test.oauthParamStripped+
                                 " browserCandidate="+test.browserCandidate+
                                 " reason="+test.reason);
+                            if(test.uaOnly.finalUrl!=null&&!test.uaOnly.finalUrl.isEmpty()){
+                                URL uaLast=new URL(test.uaOnly.finalUrl);
+                                DiagnosticLog.event("CDNTRACE","uaOnlyFinalHost="+uaLast.getHost().toLowerCase(Locale.ROOT));
+                            }
                             runOnUiThread(()->{
                                 if(test.browserCandidate){
                                     verifiedFinalUrl=test.candidateUrl;
