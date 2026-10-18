@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'app/**'
+      - 'scripts/**'
       - '.github/workflows/smoke-android.yml'
 
 permissions:
